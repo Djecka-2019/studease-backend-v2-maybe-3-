@@ -33,10 +33,12 @@ dependencies {
     implementation(libs.spring.boot.starter.validation)
     implementation(libs.spring.ai.starter.model.openai)
     implementation(libs.mapstruct)
-    implementation(libs.jjwt)
-    // Required at runtime by jjwt 0.9.1 (javax.xml.bind.DatatypeConverter); removed once jjwt is
-    // upgraded to 0.12.x in Phase 1.
-    implementation(libs.jaxb.api)
+    implementation(libs.bucket4j.core)
+    implementation(libs.commons.csv)
+
+    implementation(libs.jjwt.api)
+    runtimeOnly(libs.jjwt.impl)
+    runtimeOnly(libs.jjwt.jackson)
 
     compileOnly(libs.lombok)
     annotationProcessor(libs.lombok)

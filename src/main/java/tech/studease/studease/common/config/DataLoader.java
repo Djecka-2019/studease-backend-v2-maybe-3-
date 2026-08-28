@@ -2,13 +2,13 @@ package tech.studease.studease.common.config;
 
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
-import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.lang.NonNull;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import tech.studease.studease.common.config.properties.AdminProperties;
 import tech.studease.studease.domain.users.Authority;
 import tech.studease.studease.domain.users.Authority.AuthorityName;
 import tech.studease.studease.domain.users.AuthorityRepository;
@@ -17,30 +17,25 @@ import tech.studease.studease.domain.users.UserRepository;
 
 @Component
 @RequiredArgsConstructor
-public class DataLoader implements ApplicationListener<ContextRefreshedEvent> {
+public class DataLoader implements ApplicationListener<ApplicationReadyEvent> {
 
   private final UserRepository userRepository;
   private final AuthorityRepository authorityRepository;
   private final PasswordEncoder passwordEncoder;
-
-  @Value("${app.jwt.admin-email}")
-  private String adminEmail;
-
-  @Value("${app.jwt.admin-password}")
-  private String adminPassword;
+  private final AdminProperties adminProperties;
 
   @Override
   @Transactional
-  public void onApplicationEvent(@NonNull ContextRefreshedEvent event) {
+  public void onApplicationEvent(@NonNull ApplicationReadyEvent event) {
     Authority userAuthority = createAuthorityIfNotFound(AuthorityName.ROLE_USER);
     Authority adminAuthority = createAuthorityIfNotFound(AuthorityName.ROLE_ADMIN);
-    if (!userRepository.existsByEmail(adminEmail)) {
+    if (!userRepository.existsByEmail(adminProperties.email())) {
       User user =
           User.builder()
-              .email(adminEmail)
+              .email(adminProperties.email())
               .firstName("Admin")
               .lastName("Admin")
-              .password(passwordEncoder.encode(adminPassword))
+              .password(passwordEncoder.encode(adminProperties.password()))
               .balance(1_000_000)
               .isActive(true)
               .authorities(Set.of(userAuthority, adminAuthority))

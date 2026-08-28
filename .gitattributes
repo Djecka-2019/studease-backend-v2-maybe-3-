@@ -1,3 +1,20 @@
+# Normalize text to LF in the repo and working tree so google-java-format / spotless
+# behave identically on every platform and in CI.
+* text=auto eol=lf
+
+*.java text eol=lf
+*.kt text eol=lf
+*.kts text eol=lf
+*.toml text eol=lf
+*.properties text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.xml text eol=lf
+*.md text eol=lf
+*.st text eol=lf
 /gradlew text eol=lf
+
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+*.jar binary

@@ -1,74 +1,62 @@
 package tech.studease.studease.common.util;
 
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.MalformedJwtException;
-import io.jsonwebtoken.SignatureAlgorithm;
-import io.jsonwebtoken.SignatureException;
-import io.jsonwebtoken.UnsupportedJwtException;
+import io.jsonwebtoken.security.Keys;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
-import lombok.Getter;
-import lombok.Setter;
-import org.springframework.beans.factory.annotation.Value;
+import javax.crypto.SecretKey;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
+import tech.studease.studease.common.config.properties.JwtProperties;
 import tech.studease.studease.domain.users.User;
 import tech.studease.studease.domain.users.exception.TokenExpiredException;
 
 @Component
-@Getter
-@Setter
 public class JwtUtils {
 
-  private static final String BEARER = "Bearer ";
+  private static final String BEARER_PREFIX = "Bearer ";
 
-  @Value("${app.jwt.secret}")
-  private String secretKey;
+  private final SecretKey signingKey;
+  private final long expirationMillis;
 
-  @Value("${app.jwt.expiration}")
-  private long expiration;
+  public JwtUtils(JwtProperties properties) {
+    this.signingKey = Keys.hmacShaKeyFor(properties.secret().getBytes(StandardCharsets.UTF_8));
+    this.expirationMillis = properties.expiration();
+  }
 
   public String generateToken(Authentication authentication) {
+    Date now = new Date();
     return Jwts.builder()
-        .setSubject(authentication.getName())
-        .setIssuedAt(new Date())
-        .setExpiration(new Date(System.currentTimeMillis() + expiration))
-        .signWith(SignatureAlgorithm.HS256, secretKey)
+        .subject(authentication.getName())
+        .issuedAt(now)
+        .expiration(new Date(now.getTime() + expirationMillis))
+        .signWith(signingKey)
         .compact();
   }
 
-  public Claims extractClaims(String token) {
-    return Jwts.parser().setSigningKey(secretKey).parseClaimsJws(token).getBody();
+  public String extractSubject(String token) {
+    return Jwts.parser()
+        .verifyWith(signingKey)
+        .build()
+        .parseSignedClaims(token)
+        .getPayload()
+        .getSubject();
   }
 
-  public boolean validateToken(String token) {
-    try {
-      Jwts.parser().setSigningKey(secretKey).parseClaimsJws(token);
-      return true;
-    } catch (SignatureException
-        | MalformedJwtException
-        | ExpiredJwtException
-        | UnsupportedJwtException
-        | IllegalArgumentException e) {
-      return false;
-    }
-  }
-
-  public String parseJwt(String headerAuth) {
-    if (headerAuth != null && headerAuth.startsWith(BEARER)) {
-      return headerAuth.substring(BEARER.length());
+  public String resolveBearerToken(String authorizationHeader) {
+    if (authorizationHeader != null && authorizationHeader.startsWith(BEARER_PREFIX)) {
+      return authorizationHeader.substring(BEARER_PREFIX.length()).trim();
     }
     return null;
   }
 
   public static User getUserFromAuthentication() {
-    if (SecurityContextHolder.getContext().getAuthentication().getPrincipal()
-        instanceof User user) {
+    Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+    if (authentication != null && authentication.getPrincipal() instanceof User user) {
       return user;
-    } else {
-      throw new TokenExpiredException();
     }
+    throw new TokenExpiredException();
   }
 }

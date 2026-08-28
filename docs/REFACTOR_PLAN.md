@@ -182,17 +182,19 @@ CMD ["./mvnw", "spring-boot:run"]
 - ⏭️ Deferred: build/push image only on tag `v*` (kept push-to-`master` trigger for now — revisit in Phase 4).
 - Notes: Gradle wrapper is **9.7.1**; `google-java-format` pinned to **1.28.0** for JDK 25 daemon compatibility; `spotlessCheck` is bound to `check` (stricter than the old Maven setup, which never ran it).
 
-### Phase 1 — Security hardening _(high priority)_
-- Invert to deny-by-default; explicit `permitAll` list.
-- Real `AuthenticationEntryPoint` (401 JSON) + `@ExceptionHandler(Exception.class)` catch-all.
-- CORS origin allowlist from config.
-- Upgrade JJWT to 0.12.x; `Keys.hmacShaKeyFor`; startup check on secret length; parse token once.
-- `@ConfigurationProperties` + `@Validated` for `app.jwt.*`, admin creds, datasource — fail fast if missing.
-- Re-enable `frameOptions SAMEORIGIN` + HSTS; restore `connection-timeout`; add request-size/keep-alive limits.
-- Student flow: opaque attempt token issued at `start`, required (header) on subsequent calls.
-- Rate limiting (bucket4j) on `/auth/**`, `/tests/**`, `/questions/generate`.
-- AI endpoint: `@Min/@Max` bounds, delimit user input, per-user quota, call timeout + typed exception.
-- CSV: real writer + formula-char neutralization.
+### Phase 1 — Security hardening _(mostly DONE)_
+- ✅ Deny-by-default: `anyRequest().authenticated()` + explicit `PUBLIC_ENDPOINTS` (`/auth/register`, `/auth/login`, `/api/v1/tests/**`, `/ws/**`, `/error`, `OPTIONS`). `SecurityConfig`.
+- ✅ Real `AuthenticationEntryPoint` → `401` JSON `ErrorResponse`; `AccessDeniedHandler` → `403` JSON. `@ExceptionHandler(Exception.class)` catch-all → sanitized `500` (logs the stack, hides it); added `ConstraintViolationException` → `400` and `QuestionGenerationException` → `502`; `cleanPath` replaces the brittle `substring(4)`.
+- ✅ CORS from `CorsProperties` (`app.cors.allowed-origin-patterns`, `@NotEmpty`) — no more `"*"`. Exposes `Retry-After`.
+- ✅ JJWT **0.12.6** (`jjwt-api` + runtime `jjwt-impl`/`jjwt-jackson`), dropped `jjwt` 0.9.1 + `jaxb-api`. `Keys.hmacShaKeyFor`, single parse (`extractSubject`), constructor-built `SecretKey`. `@Size(min = 32)` on the secret fails startup fast.
+- ✅ `@ConfigurationProperties` + `@Validated` records: `JwtProperties`, `AdminProperties`, `CorsProperties`, `RateLimitProperties` (`@ConfigurationPropertiesScan`). `DataLoader` now uses `AdminProperties` and fires on `ApplicationReadyEvent` (once, not every refresh). Datasource still fails fast via unresolved `${DATASOURCE_URL}` placeholder.
+- ✅ `frameOptions SAMEORIGIN` + HSTS (1y, includeSubDomains); `server.forward-headers-strategy=framework` so HSTS/HTTPS + client IP work behind the proxy. `connection-timeout` back to `20s`; added keep-alive, swallow-size, form-post-size, multipart limits.
+- ✅ Rate limiting: in-memory bucket4j `RateLimitFilter` (per client IP, fixed window) on `/auth/**` (10/min), `/api/v1/tests/**` (60/min), `/api/v1/admin/questions/generate` (30/h) — all configurable; `429` + `Retry-After` JSON. Registered just before the security chain. Shared store (Redis) is Phase 3.
+- ✅ AI endpoint: `@Min/@Max` on `points` (1–5) and `questionsCount` (1–20) + `@NotBlank/@Size` on `theme` (`@Validated` controller); `OpenAIServiceImpl` also clamps count, strips control chars + `{}` from `theme`, truncates to 200; prompt template hardened against instruction injection; failures → typed `QuestionGenerationException` (`502`). `RestClientCustomizer` adds 10s connect / 60s read timeout to the OpenAI client.
+- ✅ CSV: Apache Commons CSV writer (proper quoting/escaping) + formula-char neutralization (`= + - @ \t \r` → prefixed `'`).
+- ✅ Bonus (from §3): removed the global-`Locale`-mutating `Validator` bean; `HttpAuthTokenFilter` no longer double-registers (constructor injection + disabled `FilterRegistrationBean`); `QuestionController`/`SampleController` depend on service interfaces.
+- ✅ Tests: `SecurityRulesTest` — anonymous admin call → JSON 401, bad bearer token → 401, `/auth/login` public but validated → 400.
+- ⏭️ **Deferred to its own PR** (breaking API change, needs frontend): student-flow opaque attempt token. `/api/v1/tests/**` stays `permitAll` with body-credential identity until then. Also deferred: AI **per-user** quota (only per-IP rate limiting so far).
 
 ### Phase 2 — Persistence & domain
 - Introduce **Flyway**, baseline current schema, switch to `ddl-auto=validate`.
@@ -226,15 +228,15 @@ CMD ["./mvnw", "spring-boot:run"]
 
 | Change | File |
 |--------|------|
-| `anyRequest().authenticated()` + permit list | `SecurityConfig` |
-| Real 401 entry point | `SecurityConfig` |
-| CORS origin allowlist | `SecurityConfig` |
-| Remove `connection-timeout=-1` | `application.properties` |
-| `@Min/@Max` on AI params | `QuestionController` |
-| Bound `questionsCount` server-side | `OpenAIServiceImpl` |
-| CSV formula-char escaping | `CsvGeneratorUtils` |
+| ✅ `anyRequest().authenticated()` + permit list | `SecurityConfig` |
+| ✅ Real 401 entry point | `SecurityConfig` |
+| ✅ CORS origin allowlist | `SecurityConfig` / `CorsProperties` |
+| ✅ Remove `connection-timeout=-1` | `application.properties` |
+| ✅ `@Min/@Max` on AI params | `QuestionController` |
+| ✅ Bound `questionsCount` server-side | `OpenAIServiceImpl` |
+| ✅ CSV formula-char escaping | `CsvGeneratorUtils` |
 | ✅ Migrate to Gradle, delete Maven files | repo root |
 | ✅ Remove `data-jdbc` starter | `build.gradle.kts` |
-| Controllers → service interfaces | `QuestionController`, `SampleController` |
-| `@ExceptionHandler(Exception.class)` catch-all | `GlobalExceptionHandler` |
+| ✅ Controllers → service interfaces | `QuestionController`, `SampleController` |
+| ✅ `@ExceptionHandler(Exception.class)` catch-all | `GlobalExceptionHandler` |
 | ✅ Add CI build/test gate | `.github/workflows/deploy.yml` |

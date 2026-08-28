@@ -9,8 +9,9 @@ spring-ai = "1.0.0"
 spotless = "7.0.2"
 mapstruct = "1.6.2"
 lombok-mapstruct-binding = "0.2.0"
-jjwt = "0.9.1"
-jaxb-api = "2.3.1"
+jjwt = "0.12.6"
+bucket4j = "8.10.1"
+commons-csv = "1.12.0"
 
 [libraries]
 # --- BOM-managed (no version) ---
@@ -32,8 +33,11 @@ spring-ai-starter-model-openai = { module = "org.springframework.ai:spring-ai-st
 mapstruct = { module = "org.mapstruct:mapstruct", version.ref = "mapstruct" }
 mapstruct-processor = { module = "org.mapstruct:mapstruct-processor", version.ref = "mapstruct" }
 lombok-mapstruct-binding = { module = "org.projectlombok:lombok-mapstruct-binding", version.ref = "lombok-mapstruct-binding" }
-jjwt = { module = "io.jsonwebtoken:jjwt", version.ref = "jjwt" }
-jaxb-api = { module = "javax.xml.bind:jaxb-api", version.ref = "jaxb-api" }
+jjwt-api = { module = "io.jsonwebtoken:jjwt-api", version.ref = "jjwt" }
+jjwt-impl = { module = "io.jsonwebtoken:jjwt-impl", version.ref = "jjwt" }
+jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
+bucket4j-core = { module = "com.bucket4j:bucket4j-core", version.ref = "bucket4j" }
+commons-csv = { module = "org.apache.commons:commons-csv", version.ref = "commons-csv" }
 
 [plugins]
 spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }

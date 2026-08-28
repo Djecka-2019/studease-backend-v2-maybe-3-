@@ -1,32 +1,50 @@
 package tech.studease.studease.common.util;
 
+import java.io.IOException;
+import java.io.StringWriter;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Objects;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVPrinter;
 import tech.studease.studease.api.sessions.dto.TestSessionDto;
 import tech.studease.studease.api.sessions.dto.TestSessionListDto;
 
-public class CsvGeneratorUtils {
-  private static final String CSV_HEADER = "Credentials,Mark,StartedAt,FinishedAt,Time\n";
+public final class CsvGeneratorUtils {
+
+  private static final CSVFormat FORMAT =
+      CSVFormat.DEFAULT
+          .builder()
+          .setHeader("Credentials", "Mark", "StartedAt", "FinishedAt", "Time")
+          .build();
+
+  private CsvGeneratorUtils() {}
 
   public static String generateCsv(TestSessionListDto testSessionListDto) {
-    StringBuilder csvContent = new StringBuilder();
-    csvContent.append(CSV_HEADER);
-    for (TestSessionDto sessionListDto : testSessionListDto.getSessions()) {
-      csvContent
-          .append(
-              String.format(
-                  "%s %s", sessionListDto.getStudentGroup(), sessionListDto.getStudentName()))
-          .append(",")
-          .append(sessionListDto.getMark())
-          .append(",")
-          .append(sessionListDto.getStartedAt())
-          .append(",")
-          .append(sessionListDto.getFinishedAt())
-          .append(",")
-          .append(formatDuration(sessionListDto.getStartedAt(), sessionListDto.getFinishedAt()))
-          .append("\n");
+    StringWriter out = new StringWriter();
+    try (CSVPrinter printer = new CSVPrinter(out, FORMAT)) {
+      for (TestSessionDto session : testSessionListDto.getSessions()) {
+        printer.printRecord(
+            neutralize(session.getStudentGroup() + " " + session.getStudentName()),
+            session.getMark(),
+            session.getStartedAt(),
+            session.getFinishedAt(),
+            formatDuration(session.getStartedAt(), session.getFinishedAt()));
+      }
+    } catch (IOException e) {
+      throw new UncheckedIOException("Failed to generate sessions CSV", e);
     }
-    return csvContent.toString();
+    return out.toString();
+  }
+
+  /** Prevents spreadsheet formula injection by prefixing risky leading characters with a quote. */
+  private static String neutralize(String value) {
+    String text = Objects.toString(value, "");
+    if (!text.isEmpty() && "=+-@\t\r".indexOf(text.charAt(0)) >= 0) {
+      return "'" + text;
+    }
+    return text;
   }
 
   private static String formatDuration(LocalDateTime start, LocalDateTime end) {

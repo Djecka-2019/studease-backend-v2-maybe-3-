@@ -2,6 +2,7 @@ package tech.studease.studease.application.users.impl;
 
 import static tech.studease.studease.common.util.JwtUtils.getUserFromAuthentication;
 
+import io.jsonwebtoken.JwtException;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -82,17 +83,21 @@ public class AuthServiceImpl implements AuthService {
 
   @Override
   public void authenticate(String authorizationHeader) {
-    String token = jwtUtils.parseJwt(authorizationHeader);
-
-    if (token != null && jwtUtils.validateToken(token)) {
-      String username = jwtUtils.extractClaims(token).getSubject();
-      UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-      if (userDetails == null) {
-        return;
-      }
-      UsernamePasswordAuthenticationToken authentication =
-          new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-      SecurityContextHolder.getContext().setAuthentication(authentication);
+    String token = jwtUtils.resolveBearerToken(authorizationHeader);
+    if (token == null) {
+      return;
     }
+
+    String username;
+    try {
+      username = jwtUtils.extractSubject(token);
+    } catch (JwtException ex) {
+      return;
+    }
+
+    UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+    UsernamePasswordAuthenticationToken authentication =
+        new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+    SecurityContextHolder.getContext().setAuthentication(authentication);
   }
 }

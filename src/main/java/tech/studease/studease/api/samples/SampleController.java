@@ -9,14 +9,14 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import tech.studease.studease.api.samples.dto.SampleListDto;
-import tech.studease.studease.application.samples.impl.SampleServiceImpl;
+import tech.studease.studease.application.samples.SampleService;
 
 @RestController
 @RequestMapping("/api/v1/admin/samples")
 @RequiredArgsConstructor
 public class SampleController {
 
-  private final SampleServiceImpl sampleService;
+  private final SampleService sampleService;
 
   @GetMapping("/{testId}")
   @PreAuthorize("isAuthenticated()")
