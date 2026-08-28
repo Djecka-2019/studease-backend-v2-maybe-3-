@@ -12,6 +12,7 @@ lombok-mapstruct-binding = "0.2.0"
 jjwt = "0.12.6"
 bucket4j = "8.10.1"
 commons-csv = "1.12.0"
+logstash-logback-encoder = "8.0"
 
 [libraries]
 # --- BOM-managed (no version) ---
@@ -40,6 +41,7 @@ jjwt-impl = { module = "io.jsonwebtoken:jjwt-impl", version.ref = "jjwt" }
 jjwt-jackson = { module = "io.jsonwebtoken:jjwt-jackson", version.ref = "jjwt" }
 bucket4j-core = { module = "com.bucket4j:bucket4j-core", version.ref = "bucket4j" }
 commons-csv = { module = "org.apache.commons:commons-csv", version.ref = "commons-csv" }
+logstash-logback-encoder = { module = "net.logstash.logback:logstash-logback-encoder", version.ref = "logstash-logback-encoder" }
 
 [plugins]
 spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }

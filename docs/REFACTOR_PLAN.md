@@ -222,9 +222,16 @@ CMD ["./mvnw", "spring-boot:run"]
 - ✅ CI (`deploy.yml`): `build` job on push/PR/tag; `deploy` job **only** on a `v*` tag or `workflow_dispatch` — a plain push to `master` now just runs the test gate. Auto-tag-on-every-push removed (`permissions: contents: read`). Image build via `docker/build-push-action` with GHA layer cache; tags `latest` + the git tag (or `sha-<12>` for manual runs).
 - Release flow is now: merge to `master` (CI tests) → `git tag vX.Y.Z && git push origin vX.Y.Z` (builds image + deploys).
 
-### Phase 5 — Tests & observability
-- ✅ (done earlier) `TestUtils` marking-matrix unit tests; Testcontainers Postgres read-path + student-flow + expiry integration tests; `SecurityRulesTest` (401 without token, public routes); Micrometer + `/actuator/prometheus`; `/actuator/health` wired to the container `HEALTHCHECK`.
-- Remaining: `JwtUtils` / custom-validator unit tests; `@WebMvcTest` slices covering every protected route; structured JSON logging + request correlation id (`MDC`); a metrics dashboard / alerts.
+### Phase 5 — Tests & observability _(DONE)_
+- ✅ Unit tests: `TestUtilsTest` (marking matrix), `JwtUtilsTest` (round-trip, wrong key / expired / garbage → `JwtException`, bearer-header parsing), `ValidatorsTest` (all four `ConstraintValidator`s). Fixed two NPEs found while testing: `AnswersValidator` on a null `isCorrect`, `QuestionTypeValidator` on a null type.
+- ✅ `SecurityRulesTest` expanded to a parameterized sweep — every protected route (`/api/v1/admin/**`, `/auth/current`, an unmapped path) → JSON `401`; `/auth/login|register` and `/api/v1/tests/**` reach their controller; `X-Frame-Options: SAMEORIGIN` present.
+- ✅ Integration: Testcontainers Postgres base + read-path (8), student-flow (2), session-expiry (1) — carried over from Phases 2–3.
+- ✅ Observability: `micrometer-registry-prometheus` + `/actuator/prometheus`; `/actuator/health` (probes) wired to the container `HEALTHCHECK`; `springBoot { buildInfo() }` → `/actuator/info`.
+- ✅ Structured logging: `logback-spring.xml` — `LogstashEncoder` JSON (one object per line, MDC + `service` field) under the `prod` profile, Spring Boot's human-readable console otherwise (dev / tests). `RequestIdFilter` (runs first) puts a sanitized/generated id in MDC `requestId` and echoes `X-Request-Id`.
+- ✅ H2 test DB fixed: dropped `MODE=PostgreSQL` (H2's PG mode rejects the `TINYINT` Hibernate emits for the un-`@Enumerated` `Question.type`, so the `question` table was silently never created in the H2 slices). Real-schema fidelity is covered by the Testcontainers tests; making `Question.type` a `STRING` enum is a data-migration change deferred to the Flyway PR.
+- Remaining (nice-to-have): `@WebMvcTest` controller slices; micrometer tracing (trace/span ids) if a collector is added; a Grafana dashboard.
+
+**Test count: 45 across 8 classes.**
 
 ---
 

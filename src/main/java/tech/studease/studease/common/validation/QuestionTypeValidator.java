@@ -11,9 +11,11 @@ public class QuestionTypeValidator implements ConstraintValidator<ValidQuestionT
 
   @Override
   public boolean isValid(String questionType, ConstraintValidatorContext context) {
+    if (questionType == null) {
+      return true;
+    }
     return Stream.of(QuestionType.values())
         .map(QuestionType::getDisplayName)
-        .toList()
-        .contains(questionType.toLowerCase());
+        .anyMatch(displayName -> displayName.equals(questionType.toLowerCase()));
   }
 }

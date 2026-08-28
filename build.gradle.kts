@@ -41,6 +41,7 @@ dependencies {
     implementation(libs.mapstruct)
     implementation(libs.bucket4j.core)
     implementation(libs.commons.csv)
+    implementation(libs.logstash.logback.encoder)
 
     implementation(libs.jjwt.api)
     runtimeOnly(libs.jjwt.impl)
