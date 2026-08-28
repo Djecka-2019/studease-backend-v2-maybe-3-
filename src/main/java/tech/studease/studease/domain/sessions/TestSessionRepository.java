@@ -24,4 +24,6 @@ public interface TestSessionRepository extends JpaRepository<TestSession, Long> 
 
   @EntityGraph(attributePaths = {"responses"})
   List<TestSession> findTestSessionsByTestId(UUID testId);
+
+  List<TestSession> findByFinishedAtIsNull();
 }

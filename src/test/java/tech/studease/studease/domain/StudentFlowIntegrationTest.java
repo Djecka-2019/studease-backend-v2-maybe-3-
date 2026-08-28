@@ -15,7 +15,7 @@ import tech.studease.studease.api.questions.dto.QuestionDto;
 import tech.studease.studease.api.sessions.dto.ResponseEntryRequestDto;
 import tech.studease.studease.api.sessions.dto.TestSessionDto;
 import tech.studease.studease.application.sessions.TestSessionService;
-import tech.studease.studease.common.event.GlobalTestSessionScheduler;
+import tech.studease.studease.common.event.TestSessionExpirySweeper;
 import tech.studease.studease.domain.answers.Choice;
 import tech.studease.studease.domain.collections.Collection;
 import tech.studease.studease.domain.collections.CollectionRepository;
@@ -38,7 +38,7 @@ import tech.studease.studease.support.PostgresIntegrationTest;
 @Sql(scripts = "/sql/clean-db.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
 class StudentFlowIntegrationTest extends PostgresIntegrationTest {
 
-  @MockBean private GlobalTestSessionScheduler scheduler;
+  @MockBean private TestSessionExpirySweeper sweeper;
   @MockBean private SimpMessagingTemplate messagingTemplate;
 
   @Autowired private UserRepository userRepository;

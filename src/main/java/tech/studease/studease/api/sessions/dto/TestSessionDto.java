@@ -22,6 +22,9 @@ public class TestSessionDto {
   private LocalDateTime startedAt;
 
   @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "dd.MM.yyyy HH:mm:ss")
+  private LocalDateTime endsAt;
+
+  @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "dd.MM.yyyy HH:mm:ss")
   private LocalDateTime finishedAt;
 
   private Integer currentQuestionIndex;

@@ -35,6 +35,10 @@ public class TestSession {
   private String studentName;
 
   private LocalDateTime startedAt;
+
+  /** When the timer runs out ({@code startedAt + test.minutesToComplete}). */
+  private LocalDateTime endsAt;
+
   private LocalDateTime finishedAt;
 
   private Integer currentQuestionIndex;

@@ -206,11 +206,14 @@ CMD ["./mvnw", "spring-boot:run"]
 - ✅ Tests: `PostgresIntegrationTest` base (Testcontainers `postgres:16-alpine`, `disabledWithoutDocker`), `ReadPathsIntegrationTest` (8 — every author read path with the persisting tx closed first), `StudentFlowIntegrationTest` (2 — start/answer/finish + force-end), `TestUtilsTest` (6 — marking matrix). H2 retained for the fast `contextLoads`/`SecurityRulesTest`.
 - ⏭️ **Deferred** (per decision): **Flyway** — kept `ddl-auto=update`; do it as its own PR with a verified `pg_dump` baseline. **Pagination** — separate PR, breaks response shapes, needs frontend. **DTOs → records** — low value / high churn given the MapStruct `.builder()` usage; skipped. **Indexes** — move to the Flyway PR (reviewed migrations, no column-name guessing).
 
-### Phase 3 — Real-time & scheduling
-- Persist `endsAt`; client-side countdown; server pushes only on state change.
-- Replace the static timer map + 1 s tick with a 10–30 s DB sweep for expired sessions — restart-safe, so deploys no longer drop live tests.
-- Single `/ws` endpoint, origin allowlist, STOMP `ChannelInterceptor` authorizing each subscription against the attempt token + session id.
-- If/when scaling past one instance: external STOMP relay (RabbitMQ) or Redis pub/sub for broadcasts.
+### Phase 3 — Real-time & scheduling _(mostly DONE)_
+- ✅ **`TestSession.endsAt`** persisted at `startTestSession` (`startedAt + minutesToComplete`), exposed in `TestSessionDto`. Clients count down locally from it.
+- ✅ **Static timer map + 1 s tick deleted.** `GlobalTestSessionScheduler` (static `ConcurrentHashMap` + `@Scheduled(1000)` per-session broadcast) → `TestSessionExpirySweeper`: one `@Scheduled(fixedDelay=15s, configurable)` DB pass over `findByFinishedAtIsNull()` that resends remaining time (`TIMER`) and force-ends expired sessions (`FORCE_END`). All state in the DB — a restart/redeploy no longer drops a live timer. `addTimer/removeTimer` static calls removed from `TestSessionServiceImpl`; a `TestSessionTimerBroadcaster` component owns the STOMP destination + payload.
+- ✅ WebSocket: origin allowlist from `CorsProperties` (was `"*"`); `StompInboundGuard` `ChannelInterceptor` rejects all client `SEND` frames (no `@MessageMapping` handlers exist, so clients had no business publishing — and the simple broker would otherwise relay a forged `FORCE_END`) and restricts `SUBSCRIBE` to `/(queue|topic)/testSession/{id}`.
+- ✅ Deleted dead code: `TestMessage`, `TestMessageType`, empty `WebSocketEventListener`.
+- ✅ Test: `TestSessionExpiryIntegrationTest` — sweep force-ends an expired session, leaves a running one alone.
+- ⏭️ **Deferred**: per-subscription authorization (bind a subscription to its owner) — needs the student attempt-token; external STOMP relay / Redis pub-sub for multi-instance broadcast — only when scaling past one node.
+- ℹ️ **Frontend note**: the `TIMER` message shape is unchanged but now arrives every ~15 s (resync) instead of every ~1 s. A client that renders the raw value still works (choppier); the intended change is a local countdown seeded from `endsAt` / the initial `TIMER`.
 
 ### Phase 4 — Delivery
 - Multi-stage `Dockerfile`: build with Maven, run on `eclipse-temurin:21-jre` with a layered/extracted jar, non-root user, `HEALTHCHECK`, container-aware JVM flags. No devtools at runtime.

@@ -1,9 +1,8 @@
 package tech.studease.studease.application.sessions.impl;
 
-import static tech.studease.studease.common.event.GlobalTestSessionScheduler.addTimer;
-import static tech.studease.studease.common.event.GlobalTestSessionScheduler.removeTimer;
 import static tech.studease.studease.common.util.TestUtils.getMaxScore;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -22,6 +21,7 @@ import tech.studease.studease.api.sessions.dto.TestSessionListDto;
 import tech.studease.studease.application.questions.mapper.QuestionMapper;
 import tech.studease.studease.application.sessions.TestSessionService;
 import tech.studease.studease.application.sessions.mapper.TestSessionMapper;
+import tech.studease.studease.common.event.TestSessionTimerBroadcaster;
 import tech.studease.studease.common.util.TestUtils;
 import tech.studease.studease.domain.answers.Answer;
 import tech.studease.studease.domain.answers.AnswerRepository;
@@ -49,6 +49,7 @@ public class TestSessionServiceImpl implements TestSessionService {
   private final AnswerRepository answerRepository;
   private final QuestionMapper questionMapper;
   private final TestSessionMapper testSessionMapper;
+  private final TestSessionTimerBroadcaster timerBroadcaster;
 
   @Override
   @Transactional(readOnly = true)
@@ -104,11 +105,13 @@ public class TestSessionServiceImpl implements TestSessionService {
       throw new IllegalStateException("Test is closed");
     }
 
+    LocalDateTime startedAt = LocalDateTime.now();
     TestSession testSession =
         TestSession.builder()
             .studentGroup(studentGroup)
             .studentName(studentName)
-            .startedAt(LocalDateTime.now())
+            .startedAt(startedAt)
+            .endsAt(startedAt.plusMinutes(test.getMinutesToComplete()))
             .currentQuestionIndex(0)
             .test(test)
             .build();
@@ -120,8 +123,8 @@ public class TestSessionServiceImpl implements TestSessionService {
     testSession.setResponses(responses);
 
     testSessionRepository.save(testSession);
-
-    addTimer(testSession.getId(), test.getMinutesToComplete() * 60);
+    timerBroadcaster.sendTick(
+        testSession.getId(), Duration.between(startedAt, testSession.getEndsAt()).toSeconds());
 
     return questionMapper.toQuestionDto(nextResponseEntry(testSession).getQuestion(), false);
   }
@@ -165,8 +168,6 @@ public class TestSessionServiceImpl implements TestSessionService {
         testRepository.findById(testId).orElseThrow(() -> new TestNotFoundException(testId));
     testSession.setMark(getMarkForSession(testSession, test));
 
-    removeTimer(testSession.getId());
-
     return testSessionMapper.toTestSessionDto(testSessionRepository.save(testSession), true, false);
   }
 
@@ -179,8 +180,6 @@ public class TestSessionServiceImpl implements TestSessionService {
 
     testSession.setFinishedAt(LocalDateTime.now());
     testSession.setMark(getMarkForSession(testSession, testSession.getTest()));
-
-    removeTimer(testSessionId);
 
     return testSessionMapper.toTestSessionDto(testSessionRepository.save(testSession), true, false);
   }

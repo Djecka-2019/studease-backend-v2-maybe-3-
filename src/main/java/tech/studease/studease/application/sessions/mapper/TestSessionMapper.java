@@ -26,6 +26,7 @@ public abstract class TestSessionMapper {
         .studentGroup(testSession.getStudentGroup())
         .studentName(testSession.getStudentName())
         .startedAt(testSession.getStartedAt())
+        .endsAt(testSession.getEndsAt())
         .finishedAt(testSession.getFinishedAt())
         .currentQuestionIndex(testSession.getCurrentQuestionIndex())
         .responses(
