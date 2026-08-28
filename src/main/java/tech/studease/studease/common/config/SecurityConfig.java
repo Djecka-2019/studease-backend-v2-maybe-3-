@@ -6,9 +6,11 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.actuate.autoconfigure.security.servlet.EndpointRequest;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -43,6 +45,8 @@ public class SecurityConfig {
   private static final String HEADER_X_REQUESTED_WITH = "X-Requested-With";
   private static final long HSTS_MAX_AGE_SECONDS = 31_536_000L;
 
+  // Reachable without a JWT; everything else requires authentication. "/api/v1/tests/**" is the
+  // student test-taking flow whose per-attempt-token hardening is tracked separately.
   private static final String[] PUBLIC_ENDPOINTS = {
     "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/tests/**", "/ws/**", "/error"
   };
@@ -114,6 +118,19 @@ public class SecurityConfig {
     return (request, response, accessDeniedException) ->
         writeError(
             response, HttpStatus.FORBIDDEN, "User is forbidden to access this resource", request);
+  }
+
+  /**
+   * Actuator runs on its own internal management port (not published by the compose file); allow
+   * the exposed endpoints through so the container health check and metric scrapers can reach them.
+   */
+  @Bean
+  @Order(1)
+  public SecurityFilterChain actuatorSecurityFilterChain(HttpSecurity http) throws Exception {
+    http.securityMatcher(EndpointRequest.toAnyEndpoint())
+        .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+        .csrf(AbstractHttpConfigurer::disable);
+    return http.build();
   }
 
   @Bean

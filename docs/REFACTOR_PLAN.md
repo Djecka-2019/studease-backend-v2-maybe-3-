@@ -215,16 +215,16 @@ CMD ["./mvnw", "spring-boot:run"]
 - ⏭️ **Deferred**: per-subscription authorization (bind a subscription to its owner) — needs the student attempt-token; external STOMP relay / Redis pub-sub for multi-instance broadcast — only when scaling past one node.
 - ℹ️ **Frontend note**: the `TIMER` message shape is unchanged but now arrives every ~15 s (resync) instead of every ~1 s. A client that renders the raw value still works (choppier); the intended change is a local countdown seeded from `endsAt` / the initial `TIMER`.
 
-### Phase 4 — Delivery
-- Multi-stage `Dockerfile`: build with Maven, run on `eclipse-temurin:21-jre` with a layered/extracted jar, non-root user, `HEALTHCHECK`, container-aware JVM flags. No devtools at runtime.
-- `application-dev.properties` / `application-prod.properties`; expose actuator health + Prometheus on an internal port.
-- Deploy on tag, not every `master` push.
+### Phase 4 — Delivery _(DONE)_
+- ✅ `Dockerfile`: Gradle build stage (BuildKit cache mount for `~/.gradle`) → layered jar split via `java -Djarmode=tools ... extract --layers` → `eclipse-temurin:21-jre` runtime, non-root `spring` user, `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75`, `HEALTHCHECK` curling `/actuator/health`. devtools already excluded (`developmentOnly`) since Phase 0. `bootJar` archive fixed to `app.jar` for a stable Dockerfile. Verified end-to-end against a real Postgres container (starts, health `UP`, deny-by-default intact on 8080). Image ~580 MB (JRE base + curl); a `jlink` runtime is a possible later trim.
+- ✅ Profiles: `spring.profiles.default=prod`. `application-prod.properties` (SQL off, `server.error.include-*` all off), `application-dev.properties` (SQL + full actuator + error detail). Tests keep their own `src/test/resources/application.properties` (no profile) so they're unaffected.
+- ✅ Actuator on a dedicated internal port `${MANAGEMENT_PORT:8081}` (not published by compose): `health`, `info` (build-info via `springBoot { buildInfo() }`), `prometheus` (`micrometer-registry-prometheus`). Health probes enabled. A second `@Order(1)` `SecurityFilterChain` scoped by `EndpointRequest.toAnyEndpoint()` permits the actuator port; the main chain is untouched.
+- ✅ CI (`deploy.yml`): `build` job on push/PR/tag; `deploy` job **only** on a `v*` tag or `workflow_dispatch` — a plain push to `master` now just runs the test gate. Auto-tag-on-every-push removed (`permissions: contents: read`). Image build via `docker/build-push-action` with GHA layer cache; tags `latest` + the git tag (or `sha-<12>` for manual runs).
+- Release flow is now: merge to `master` (CI tests) → `git tag vX.Y.Z && git push origin vX.Y.Z` (builds image + deploys).
 
 ### Phase 5 — Tests & observability
-- Unit tests: `TestUtils` marking matrix (single/multiple choice, essay, zero-correct, partial), `JwtUtils`, custom validators.
-- `@WebMvcTest` slices: every protected route → `401` without a token; student routes reachable without one.
-- Testcontainers Postgres integration test for the full student flow; AI mocked.
-- Structured JSON logging, request correlation id (`MDC`), Micrometer metrics, `/actuator/health` wired to the container `HEALTHCHECK`.
+- ✅ (done earlier) `TestUtils` marking-matrix unit tests; Testcontainers Postgres read-path + student-flow + expiry integration tests; `SecurityRulesTest` (401 without token, public routes); Micrometer + `/actuator/prometheus`; `/actuator/health` wired to the container `HEALTHCHECK`.
+- Remaining: `JwtUtils` / custom-validator unit tests; `@WebMvcTest` slices covering every protected route; structured JSON logging + request correlation id (`MDC`); a metrics dashboard / alerts.
 
 ---
 

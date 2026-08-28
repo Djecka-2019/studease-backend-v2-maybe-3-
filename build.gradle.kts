@@ -15,6 +15,10 @@ java {
     }
 }
 
+springBoot {
+    buildInfo()
+}
+
 repositories {
     mavenCentral()
 }
@@ -31,6 +35,8 @@ dependencies {
     implementation(libs.spring.boot.starter.data.jpa)
     implementation(libs.spring.boot.starter.websocket)
     implementation(libs.spring.boot.starter.validation)
+    implementation(libs.spring.boot.starter.actuator)
+    runtimeOnly(libs.micrometer.registry.prometheus)
     implementation(libs.spring.ai.starter.model.openai)
     implementation(libs.mapstruct)
     implementation(libs.bucket4j.core)
@@ -66,6 +72,11 @@ tasks.withType<JavaCompile>().configureEach {
 // Only the executable bootJar is published; the "-plain" library jar is not used.
 tasks.named<Jar>("jar") {
     enabled = false
+}
+
+// Stable artifact name so the Dockerfile does not depend on the project version.
+tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
+    archiveFileName.set("app.jar")
 }
 
 tasks.withType<Test>().configureEach {
