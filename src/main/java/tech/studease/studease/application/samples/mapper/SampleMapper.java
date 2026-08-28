@@ -6,9 +6,9 @@ import java.util.stream.Collectors;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.core.context.SecurityContextHolder;
 import tech.studease.studease.api.samples.dto.SampleDto;
 import tech.studease.studease.api.samples.dto.SampleListDto;
+import tech.studease.studease.common.security.CurrentUser;
 import tech.studease.studease.domain.collections.Collection;
 import tech.studease.studease.domain.collections.CollectionRepository;
 import tech.studease.studease.domain.collections.exception.CollectionNotFoundException;
@@ -18,6 +18,7 @@ import tech.studease.studease.domain.samples.Sample;
 public abstract class SampleMapper {
 
   @Autowired private CollectionRepository collectionRepository;
+  @Autowired private CurrentUser currentUser;
 
   public Set<Sample> toSample(List<SampleDto> sampleDtos) {
     if (sampleDtos == null || sampleDtos.isEmpty()) {
@@ -26,7 +27,7 @@ public abstract class SampleMapper {
     return sampleDtos.stream()
         .map(
             (sampleDto) -> {
-              String authorEmail = SecurityContextHolder.getContext().getAuthentication().getName();
+              String authorEmail = currentUser.requireEmail();
               Collection collection =
                   collectionRepository
                       .findByIdAndAuthorEmail(sampleDto.getCollectionId(), authorEmail)

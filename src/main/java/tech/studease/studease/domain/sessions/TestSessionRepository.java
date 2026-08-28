@@ -12,23 +12,16 @@ import org.springframework.stereotype.Repository;
 public interface TestSessionRepository extends JpaRepository<TestSession, Long> {
 
   @NonNull
-  @EntityGraph(
-      attributePaths = {
-        "test",
-        "test.questions",
-        "test.samples",
-        "responses",
-        "responses.question",
-        "responses.question.answers",
-        "responses.answers"
-      })
+  @EntityGraph(attributePaths = {"test", "test.questions", "test.samples", "responses"})
   Optional<TestSession> findById(@NonNull Long id);
 
+  @EntityGraph(attributePaths = {"test", "responses"})
   Optional<TestSession> findTestSessionByStudentGroupAndStudentNameAndTestId(
       String studentGroup, String studentName, UUID testId);
 
   boolean existsByStudentGroupAndStudentNameAndTestId(
       String studentGroup, String studentName, UUID testId);
 
+  @EntityGraph(attributePaths = {"responses"})
   List<TestSession> findTestSessionsByTestId(UUID testId);
 }

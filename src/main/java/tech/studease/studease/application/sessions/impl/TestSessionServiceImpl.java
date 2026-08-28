@@ -14,6 +14,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import tech.studease.studease.api.questions.dto.QuestionDto;
 import tech.studease.studease.api.sessions.dto.ResponseEntryRequestDto;
 import tech.studease.studease.api.sessions.dto.TestSessionDto;
@@ -40,6 +41,7 @@ import tech.studease.studease.domain.users.Credentials;
 
 @Service
 @RequiredArgsConstructor
+@Transactional
 public class TestSessionServiceImpl implements TestSessionService {
 
   private final TestSessionRepository testSessionRepository;
@@ -49,12 +51,14 @@ public class TestSessionServiceImpl implements TestSessionService {
   private final TestSessionMapper testSessionMapper;
 
   @Override
+  @Transactional(readOnly = true)
   public TestSessionListDto findByTestId(UUID testId) {
     return testSessionMapper.toTestSessionListDto(
         testSessionRepository.findTestSessionsByTestId(testId));
   }
 
   @Override
+  @Transactional(readOnly = true)
   public TestSessionListDto findByTestIdAndCredentials(UUID testId, Credentials credentials) {
     TestSession testSession =
         testSessionRepository
@@ -68,6 +72,7 @@ public class TestSessionServiceImpl implements TestSessionService {
   }
 
   @Override
+  @Transactional(readOnly = true)
   public TestSessionDto findByTestIdAndCredentialsForStudent(UUID testId, Credentials credentials) {
     TestSession testSession =
         testSessionRepository
@@ -138,10 +143,15 @@ public class TestSessionServiceImpl implements TestSessionService {
   public QuestionDto nextQuestion(UUID testId, ResponseEntryRequestDto responseEntryRequestDto) {
     TestSession testSession = updateWithAnswer(testId, responseEntryRequestDto);
 
-    testSession.setCurrentQuestionIndex(testSession.getCurrentQuestionIndex() + 1);
+    testSession.setCurrentQuestionIndex(answeredCount(testSession));
     testSessionRepository.save(testSession);
 
     return questionMapper.toQuestionDto(nextResponseEntry(testSession).getQuestion(), false);
+  }
+
+  /** The single source of truth for quiz position: how many responses have been answered so far. */
+  private static int answeredCount(TestSession testSession) {
+    return (int) testSession.getResponses().stream().filter(r -> !r.getAnswers().isEmpty()).count();
   }
 
   @Override
@@ -234,16 +244,20 @@ public class TestSessionServiceImpl implements TestSessionService {
       throw new IllegalArgumentException("Answer must not be a text");
     }
 
-    List<Answer> answers = new ArrayList<>();
-    Answer essayAnswer =
+    List<Answer> existing = responseEntry.getAnswers();
+    if (existing != null && !existing.isEmpty() && existing.get(0) instanceof Essay essay) {
+      essay.setContent(answerContent);
+      return;
+    }
+
+    Essay essayAnswer =
         Essay.builder()
             .isCorrect(true)
             .content(answerContent)
             .question(responseEntry.getQuestion())
             .build();
     answerRepository.save(essayAnswer);
-    answers.add(essayAnswer);
-    responseEntry.setAnswers(answers);
+    responseEntry.setAnswers(new ArrayList<>(List.of(essayAnswer)));
   }
 
   private void addTestQuestions(
@@ -262,11 +276,19 @@ public class TestSessionServiceImpl implements TestSessionService {
       List<ResponseEntry> responses, Set<Sample> samples, TestSession testSession) {
     Random random = new Random();
     for (Sample sample : samples) {
-      Set<Question> sampleQuestions = sample.getCollection().getQuestions();
       List<Question> selectedQuestions =
-          sampleQuestions.stream()
+          sample.getCollection().getQuestions().stream()
               .filter(q -> q.getPoints().equals(sample.getPoints()))
               .collect(Collectors.toList());
+      if (selectedQuestions.size() < sample.getQuestionsCount()) {
+        throw new IllegalStateException(
+            "Sample requires "
+                + sample.getQuestionsCount()
+                + " questions worth "
+                + sample.getPoints()
+                + " points but its collection has only "
+                + selectedQuestions.size());
+      }
       for (int i = 0; i < sample.getQuestionsCount(); i++) {
         Question question = selectedQuestions.remove(random.nextInt(selectedQuestions.size()));
         responses.add(

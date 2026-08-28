@@ -1,10 +1,7 @@
 package tech.studease.studease.application.collections.impl;
 
-import static tech.studease.studease.common.util.JwtUtils.getUserFromAuthentication;
-
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tech.studease.studease.api.collections.dto.CollectionDeleteRequestDto;
@@ -13,6 +10,7 @@ import tech.studease.studease.api.collections.dto.CollectionInfo;
 import tech.studease.studease.api.collections.dto.CollectionListInfo;
 import tech.studease.studease.application.collections.CollectionService;
 import tech.studease.studease.application.collections.mapper.CollectionMapper;
+import tech.studease.studease.common.security.CurrentUser;
 import tech.studease.studease.domain.collections.Collection;
 import tech.studease.studease.domain.collections.CollectionRepository;
 import tech.studease.studease.domain.collections.exception.CollectionAlreadyExistsException;
@@ -28,17 +26,20 @@ public class CollectionServiceImpl implements CollectionService {
   private final CollectionRepository collectionRepository;
   private final SampleRepository sampleRepository;
   private final CollectionMapper collectionMapper;
+  private final CurrentUser currentUser;
 
   @Override
+  @Transactional(readOnly = true)
   public CollectionListInfo findAll() {
-    String authorEmail = SecurityContextHolder.getContext().getAuthentication().getName();
+    String authorEmail = currentUser.requireEmail();
     return collectionMapper.toCollectionListInfo(
         collectionRepository.findAllByAuthorEmail(authorEmail));
   }
 
   @Override
+  @Transactional(readOnly = true)
   public CollectionInfo findById(Long collectionId) {
-    String authorEmail = SecurityContextHolder.getContext().getAuthentication().getName();
+    String authorEmail = currentUser.requireEmail();
     Collection collection =
         collectionRepository
             .findByIdAndAuthorEmail(collectionId, authorEmail)
@@ -49,7 +50,7 @@ public class CollectionServiceImpl implements CollectionService {
   @Override
   @Transactional
   public CollectionInfo create(CollectionDto collectionDto) {
-    User author = getUserFromAuthentication();
+    User author = currentUser.require();
     if (collectionRepository.existsByNameAndAuthorEmail(
         collectionDto.getName(), author.getEmail())) {
       throw new CollectionAlreadyExistsException(collectionDto.getName());
@@ -62,7 +63,7 @@ public class CollectionServiceImpl implements CollectionService {
   @Override
   @Transactional
   public void deleteById(Long collectionId) {
-    String authorEmail = SecurityContextHolder.getContext().getAuthentication().getName();
+    String authorEmail = currentUser.requireEmail();
     if (!collectionRepository.existsByIdAndAuthorEmail(collectionId, authorEmail)) {
       throw new CollectionNotFoundException(collectionId);
     }
@@ -75,7 +76,7 @@ public class CollectionServiceImpl implements CollectionService {
   @Override
   @Transactional
   public void deleteAllByIds(CollectionDeleteRequestDto request) {
-    String authorEmail = SecurityContextHolder.getContext().getAuthentication().getName();
+    String authorEmail = currentUser.requireEmail();
     List<Collection> collections = collectionRepository.findAllById(request.getCollectionIds());
     if (collections.isEmpty()) {
       return;

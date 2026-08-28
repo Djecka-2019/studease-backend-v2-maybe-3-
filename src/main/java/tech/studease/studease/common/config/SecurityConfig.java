@@ -44,11 +44,7 @@ public class SecurityConfig {
   private static final long HSTS_MAX_AGE_SECONDS = 31_536_000L;
 
   private static final String[] PUBLIC_ENDPOINTS = {
-    "/api/v1/auth/register",
-    "/api/v1/auth/login",
-    "/api/v1/tests/**",
-    "/ws/**",
-    "/error"
+    "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/tests/**", "/ws/**", "/error"
   };
 
   private final CorsProperties corsProperties;

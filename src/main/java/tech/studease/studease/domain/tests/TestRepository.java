@@ -15,12 +15,13 @@ public interface TestRepository extends JpaRepository<Test, UUID> {
   @NonNull
   List<Test> findAllById(@NonNull Iterable<UUID> ids);
 
-  @EntityGraph(attributePaths = {"sessions", "questions", "samples"})
+  @EntityGraph(attributePaths = {"sessions"})
   List<Test> findByAuthorEmail(String email);
 
-  @EntityGraph(attributePaths = {"sessions", "questions", "samples", "author"})
+  @EntityGraph(attributePaths = {"questions", "samples", "author"})
   @NonNull
   Optional<Test> findById(@NonNull UUID testId);
 
+  @EntityGraph(attributePaths = {"questions", "samples"})
   Optional<Test> getTestById(@NonNull UUID testId);
 }

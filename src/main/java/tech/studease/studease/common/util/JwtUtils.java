@@ -7,11 +7,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import javax.crypto.SecretKey;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import tech.studease.studease.common.config.properties.JwtProperties;
-import tech.studease.studease.domain.users.User;
-import tech.studease.studease.domain.users.exception.TokenExpiredException;
 
 @Component
 public class JwtUtils {
@@ -50,13 +47,5 @@ public class JwtUtils {
       return authorizationHeader.substring(BEARER_PREFIX.length()).trim();
     }
     return null;
-  }
-
-  public static User getUserFromAuthentication() {
-    Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-    if (authentication != null && authentication.getPrincipal() instanceof User user) {
-      return user;
-    }
-    throw new TokenExpiredException();
   }
 }

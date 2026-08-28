@@ -17,6 +17,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.BatchSize;
 import tech.studease.studease.domain.questions.Question;
 import tech.studease.studease.domain.samples.Sample;
 import tech.studease.studease.domain.sessions.TestSession;
@@ -46,20 +47,23 @@ public class Test {
       fetch = FetchType.LAZY,
       orphanRemoval = true,
       cascade = CascadeType.ALL)
+  @BatchSize(size = 100)
   private List<TestSession> sessions;
 
   @OneToMany(
       mappedBy = "test",
-      fetch = FetchType.EAGER,
+      fetch = FetchType.LAZY,
       orphanRemoval = true,
       cascade = CascadeType.ALL)
+  @BatchSize(size = 100)
   private Set<Question> questions;
 
   @OneToMany(
       mappedBy = "test",
-      fetch = FetchType.EAGER,
+      fetch = FetchType.LAZY,
       orphanRemoval = true,
       cascade = CascadeType.ALL)
+  @BatchSize(size = 100)
   private Set<Sample> samples;
 
   @ManyToOne(fetch = FetchType.LAZY)

@@ -30,7 +30,7 @@ public class Sample {
 
   private Integer questionsCount;
 
-  @ManyToOne(fetch = FetchType.EAGER)
+  @ManyToOne(fetch = FetchType.LAZY)
   private Collection collection;
 
   @ManyToOne(fetch = FetchType.LAZY)

@@ -196,14 +196,15 @@ CMD ["./mvnw", "spring-boot:run"]
 - ✅ Tests: `SecurityRulesTest` — anonymous admin call → JSON 401, bad bearer token → 401, `/auth/login` public but validated → 400.
 - ⏭️ **Deferred to its own PR** (breaking API change, needs frontend): student-flow opaque attempt token. `/api/v1/tests/**` stays `permitAll` with body-credential identity until then. Also deferred: AI **per-user** quota (only per-IP rate limiting so far).
 
-### Phase 2 — Persistence & domain
-- Introduce **Flyway**, baseline current schema, switch to `ddl-auto=validate`.
-- All associations `LAZY`; add `@EntityGraph`/fetch-join queries; remove `Hibernate.initialize` loops.
-- `CurrentUser` component injected via `@AuthenticationPrincipal`; delete static `getUserFromAuthentication`; push ownership into repository queries.
-- Fix bugs: `createAll` collection association; `calculateMark` divide-by-zero; `addSampleQuestions` insufficient-questions guard; single source of truth for quiz position; don't re-insert `Essay` on revisit.
-- DTOs → `record`; controllers depend on interfaces (or drop single-impl interfaces entirely and keep only real seams).
-- Add indexes + Hibernate batch settings (Flyway + properties).
-- Pagination on all list/report endpoints.
+### Phase 2 — Persistence & domain _(mostly DONE)_
+- ✅ **All associations `LAZY`** (`Test.questions/samples`, `Question.answers`, `Collection.questions/samples`, `TestSession.responses`, `ResponseEntry.*`, `Sample.collection`; `User.authorities` deliberately kept EAGER for `UserDetails`). `@BatchSize(100)` on every collection + `hibernate.default_batch_fetch_size=50`, `order_inserts/updates`, `jdbc.batch_size=30`.
+- ✅ `@EntityGraph` fetch plans reworked to avoid cartesian blow-ups on list queries and `MultipleBagFetchException` (never two "bag" lists in one graph); `Hibernate.initialize(...)` loops in `QuestionServiceImpl` removed (now `@EntityGraph({"answers"})` on the repo).
+- ✅ `@Transactional` added where DTO mapping happens outside a persistence context: `TestSessionServiceImpl` (class-level; readers `readOnly`), `TestServiceImpl.findAll/findById/findByIdForStudent/create/update`, `QuestionServiceImpl`, `SampleServiceImpl`, `CollectionServiceImpl.findAll/findById`. This also **fixed a latent bug**: `startTestSession` could throw `LazyInitializationException` on sample/collection questions in prod.
+- ✅ `CurrentUser` bean (`common/security`) replaces the static `JwtUtils.getUserFromAuthentication()` (deleted) and the scattered `SecurityContextHolder.getContext().getAuthentication().getName()` calls — injected into 6 services + `SampleMapper`.
+- ✅ Ownership pushed into queries where cheap: `QuestionService.findByCollectionId` uses `existsByIdAndAuthorEmail`; `createAll` uses `findByIdAndAuthorEmail`.
+- ✅ Bug fixes: `createAll` now attaches questions to the collection (was a no-op param); `calculateMark` returns 0 instead of `NaN`-cast when a question has no correct answer; `addSampleQuestions` throws a clear error when the collection lacks enough questions (was `IndexOutOfBounds`); quiz position (`currentQuestionIndex`) is now derived from answered responses, not a blind counter; `saveAnswers(String)` updates the existing `Essay` on re-answer instead of orphaning a row.
+- ✅ Tests: `PostgresIntegrationTest` base (Testcontainers `postgres:16-alpine`, `disabledWithoutDocker`), `ReadPathsIntegrationTest` (8 — every author read path with the persisting tx closed first), `StudentFlowIntegrationTest` (2 — start/answer/finish + force-end), `TestUtilsTest` (6 — marking matrix). H2 retained for the fast `contextLoads`/`SecurityRulesTest`.
+- ⏭️ **Deferred** (per decision): **Flyway** — kept `ddl-auto=update`; do it as its own PR with a verified `pg_dump` baseline. **Pagination** — separate PR, breaks response shapes, needs frontend. **DTOs → records** — low value / high churn given the MapStruct `.builder()` usage; skipped. **Indexes** — move to the Flyway PR (reviewed migrations, no column-name guessing).
 
 ### Phase 3 — Real-time & scheduling
 - Persist `endsAt`; client-side countdown; server pushes only on state change.

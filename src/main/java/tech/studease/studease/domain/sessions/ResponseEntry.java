@@ -16,6 +16,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.BatchSize;
 import tech.studease.studease.domain.answers.Answer;
 import tech.studease.studease.domain.questions.Question;
 
@@ -31,7 +32,7 @@ public class ResponseEntry {
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
-  @ManyToOne(fetch = FetchType.EAGER)
+  @ManyToOne(fetch = FetchType.LAZY)
   @JoinColumn(
       name = "question_id",
       foreignKey =
@@ -40,7 +41,8 @@ public class ResponseEntry {
                   "FOREIGN KEY (question_id) REFERENCES question(id) ON DELETE CASCADE"))
   private Question question;
 
-  @ManyToMany(fetch = FetchType.EAGER)
+  @ManyToMany(fetch = FetchType.LAZY)
+  @BatchSize(size = 100)
   @JoinTable(
       name = "response_entry_answers",
       joinColumns =
@@ -59,7 +61,7 @@ public class ResponseEntry {
                           "FOREIGN KEY (answers_id) REFERENCES answer(id) ON DELETE CASCADE")))
   private List<Answer> answers;
 
-  @ManyToOne(fetch = FetchType.EAGER)
+  @ManyToOne(fetch = FetchType.LAZY)
   @JoinColumn(
       name = "test_session_id",
       foreignKey =

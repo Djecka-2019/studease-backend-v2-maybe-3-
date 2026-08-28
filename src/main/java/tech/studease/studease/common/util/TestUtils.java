@@ -45,6 +45,9 @@ public class TestUtils {
             .filter(Answer::getIsCorrect)
             .map(Answer::getId)
             .toList();
+    if (correctAnswerIds.isEmpty()) {
+      return 0;
+    }
     List<Long> studentAnswerIds = responseEntry.getAnswers().stream().map(Answer::getId).toList();
     long correctCount = studentAnswerIds.stream().filter(correctAnswerIds::contains).count();
     if (responseEntry.getQuestion().getType() == QuestionType.MULTIPLE_CHOICES) {
