@@ -3,6 +3,7 @@ package tech.studease.studease.api.sessions.dto;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -15,6 +16,10 @@ import lombok.NoArgsConstructor;
 public class TestSessionDto {
 
   private String sessionId;
+
+  /** WebSocket destination segment for this attempt: {@code /topic/testSession/{sessionKey}}. */
+  private UUID sessionKey;
+
   private String studentGroup;
   private String studentName;
 

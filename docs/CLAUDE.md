@@ -103,10 +103,13 @@ appears as a sub-package in all four layers. Controllers depend on **service int
 
 - **Admins** — JWT bearer token, routes under `/api/v1/admin/**`, guarded by deny-by-default plus
   `@PreAuthorize("isAuthenticated()")` on every method as a second layer.
-- **Students** — the test-taking flow `/api/v1/tests/**` is currently `permitAll`; a student is
-  identified only by a `Credentials {studentGroup, studentName}` JSON body (`domain/users/Credentials`,
-  a record). Opaque per-attempt token hardening is **deferred** (see REFACTOR_PLAN §2.5) — do not
-  assume this endpoint is authenticated.
+- **Students** — the test-taking flow `/api/v1/tests/**` is `permitAll` in Spring Security terms,
+  but is authorised by an **opaque attempt token**. `POST /{testId}/start` takes
+  `Credentials {studentGroup, studentName}` once and returns `StartTestSessionDto`
+  (`attemptToken`, `sessionKey`, `endsAt`, `currentQuestion`). Every later call sends
+  `X-Attempt-Token`; body credentials are gone. Only the SHA-256 of the token is stored
+  (`common/security/AttemptTokens`), and it is verified against the `testId` in the path.
+  **Never log a token.**
 
 ### Security (`common/config/SecurityConfig`)
 
@@ -144,15 +147,32 @@ never cookie.
 - Current user is obtained via the injected `common/security/CurrentUser` bean, **not** static
   `SecurityContextHolder` access.
 
+### Student API shape
+
+| Call | Auth | Returns |
+|---|---|---|
+| `GET /api/v1/tests/{testId}` | none | `TestInfo` |
+| `POST /api/v1/tests/{testId}/start` | body credentials | `StartTestSessionDto` |
+| `GET /api/v1/tests/{testId}/current-question` | `X-Attempt-Token` | `CurrentQuestionDto` |
+| `GET /api/v1/tests/{testId}/current-session` | `X-Attempt-Token` | `TestSessionDto` |
+| `POST /api/v1/tests/{testId}/next-question` | `X-Attempt-Token` | `CurrentQuestionDto` |
+| `POST /api/v1/tests/{testId}/finish` | `X-Attempt-Token` | `TestSessionDto` |
+
+Answer submissions carry a **required `responseEntryId`** (from `CurrentQuestionDto`). The server
+no longer infers the target as "the first unanswered response", which mis-attributed retries.
+`finish` is idempotent; a bad token is `401`, a concurrent modification `409`.
+
 ### Real-time timers (`common/event/`)
 
 No in-memory session state. `TestSessionExpirySweeper` runs one `@Scheduled` DB pass every
 `app.test-session.sweep-interval-ms` (default 15s) over `findByFinishedAtIsNull()`: it rebroadcasts
 remaining seconds (`TimerMessage` type `TICK`) and force-ends sessions past `endsAt` (`FORCE_END`).
 Clients count down locally between ticks from `endsAt`. `TestSessionTimerBroadcaster` owns the STOMP
-payload. `WebSocketConfig` uses a simple broker; `StompInboundGuard` (`ChannelInterceptor`) rejects
-all client `SEND` frames and restricts `SUBSCRIBE` to `/(queue|topic)/testSession/{id}`. Restarts
-never drop a live timer.
+payload and the destination, which is **`/topic/testSession/{sessionKey}`** — the attempt's random
+UUID, not its sequential primary key. `WebSocketConfig` uses a simple broker; `StompInboundGuard`
+(`ChannelInterceptor`) rejects all client `SEND` frames and requires a `SUBSCRIBE` to prove
+ownership by presenting `X-Attempt-Token` (on the SUBSCRIBE frame, or on CONNECT). Restarts never
+drop a live timer.
 
 ### AI question generation
 

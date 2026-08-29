@@ -9,6 +9,7 @@ import static tech.studease.studease.common.util.ValidationUtils.getErrorRespons
 import jakarta.persistence.EntityNotFoundException;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -24,6 +25,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 import tech.studease.studease.application.questions.exception.QuestionGenerationException;
 import tech.studease.studease.domain.collections.exception.CollectionAlreadyExistsException;
 import tech.studease.studease.domain.collections.exception.CollectionInUseException;
+import tech.studease.studease.domain.sessions.exception.InvalidAttemptTokenException;
 import tech.studease.studease.domain.sessions.exception.TestSessionAlreadyExistsException;
 import tech.studease.studease.domain.users.exception.TokenExpiredException;
 
@@ -40,6 +42,22 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
   public ResponseEntity<ErrorResponse> handleAuthorizationException(
       RuntimeException exc, WebRequest request) {
     return build(UNAUTHORIZED, exc.getMessage(), request);
+  }
+
+  @ExceptionHandler(InvalidAttemptTokenException.class)
+  public ResponseEntity<ErrorResponse> handleInvalidAttemptToken(
+      InvalidAttemptTokenException exc, WebRequest request) {
+    // Never log the presented token, and never say which way it was wrong.
+    return build(UNAUTHORIZED, exc.getMessage(), request);
+  }
+
+  @ExceptionHandler(OptimisticLockingFailureException.class)
+  public ResponseEntity<ErrorResponse> handleOptimisticLock(WebRequest request) {
+    // Two submissions raced for one attempt. Previously one silently overwrote the other.
+    return build(
+        HttpStatus.CONFLICT,
+        "This attempt was modified concurrently. Reload the current question and retry.",
+        request);
   }
 
   @ExceptionHandler(EntityNotFoundException.class)

@@ -14,8 +14,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.test.context.jdbc.Sql;
-import tech.studease.studease.api.questions.dto.QuestionDto;
+import tech.studease.studease.api.sessions.dto.CurrentQuestionDto;
 import tech.studease.studease.api.sessions.dto.ResponseEntryRequestDto;
+import tech.studease.studease.api.sessions.dto.StartTestSessionDto;
 import tech.studease.studease.api.sessions.dto.TestSessionDto;
 import tech.studease.studease.api.sessions.dto.TestSessionListDto;
 import tech.studease.studease.application.sessions.TestSessionService;
@@ -108,13 +109,13 @@ class EssayIsolationIntegrationTest extends PostgresIntegrationTest {
     Credentials studentB = new Credentials("CS-1", "Bob");
 
     // A takes the test and submits a distinctive essay.
-    testSessionService.startTestSession(testId, studentA);
-    testSessionService.finishTestSession(testId, essayAnswer(studentA, SECRET_A));
+    submitEssay(studentA, SECRET_A);
 
     // B now starts the same test and is served the same shared question.
-    QuestionDto servedToB = testSessionService.startTestSession(testId, studentB);
+    StartTestSessionDto startedByB = testSessionService.startTestSession(testId, studentB);
+    CurrentQuestionDto servedToB = startedByB.getCurrentQuestion();
 
-    assertThat(servedToB.getAnswers())
+    assertThat(servedToB.getQuestion().getAnswers())
         .as("an essay question carries no answer options; this list is where the essay leaked")
         .isEmpty();
     assertThat(servedToB.toString())
@@ -122,8 +123,9 @@ class EssayIsolationIntegrationTest extends PostgresIntegrationTest {
         .doesNotContain(SECRET_A);
 
     // Re-fetching mid-attempt must stay clean too.
-    QuestionDto refetched = testSessionService.getCurrentQuestion(testId, studentB);
-    assertThat(refetched.getAnswers()).isEmpty();
+    CurrentQuestionDto refetched =
+        testSessionService.getCurrentQuestion(testId, startedByB.getAttemptToken());
+    assertThat(refetched.getQuestion().getAnswers()).isEmpty();
     assertThat(refetched.toString()).doesNotContain(SECRET_A);
   }
 
@@ -132,10 +134,8 @@ class EssayIsolationIntegrationTest extends PostgresIntegrationTest {
     Credentials studentA = new Credentials("CS-1", "Alice");
     Credentials studentB = new Credentials("CS-1", "Bob");
 
-    testSessionService.startTestSession(testId, studentA);
-    testSessionService.finishTestSession(testId, essayAnswer(studentA, SECRET_A));
-    testSessionService.startTestSession(testId, studentB);
-    testSessionService.finishTestSession(testId, essayAnswer(studentB, SECRET_B));
+    submitEssay(studentA, SECRET_A);
+    submitEssay(studentB, SECRET_B);
 
     TestSessionListDto a = testSessionService.findByTestIdAndCredentials(testId, studentA);
     TestSessionListDto b = testSessionService.findByTestIdAndCredentials(testId, studentB);
@@ -151,10 +151,8 @@ class EssayIsolationIntegrationTest extends PostgresIntegrationTest {
     Credentials studentA = new Credentials("CS-1", "Alice");
     Credentials studentB = new Credentials("CS-1", "Bob");
 
-    testSessionService.startTestSession(testId, studentA);
-    testSessionService.finishTestSession(testId, essayAnswer(studentA, SECRET_A));
-    testSessionService.startTestSession(testId, studentB);
-    testSessionService.finishTestSession(testId, essayAnswer(studentB, SECRET_B));
+    submitEssay(studentA, SECRET_A);
+    submitEssay(studentB, SECRET_B);
 
     Number essayRows =
         (Number)
@@ -185,7 +183,7 @@ class EssayIsolationIntegrationTest extends PostgresIntegrationTest {
     // row, so the expiry sweeper's force-end threw NoSuchElementException and the attempt was
     // never closed. This is the path that hits every unfinished session at the end of an exam.
     Credentials student = new Credentials("CS-1", "Carol");
-    testSessionService.startTestSession(testId, student);
+    StartTestSessionDto started = testSessionService.startTestSession(testId, student);
     Long sessionId =
         testSessionRepository
             .findTestSessionByStudentGroupAndStudentNameAndTestId("CS-1", "Carol", testId)
@@ -196,14 +194,19 @@ class EssayIsolationIntegrationTest extends PostgresIntegrationTest {
         .doesNotThrowAnyException();
 
     TestSessionDto session =
-        testSessionService.findByTestIdAndCredentialsForStudent(testId, student);
+        testSessionService.findByAttemptToken(testId, started.getAttemptToken());
     assertThat(session.getFinishedAt()).isNotNull();
   }
 
-  private ResponseEntryRequestDto essayAnswer(Credentials credentials, String content) {
-    return ResponseEntryRequestDto.builder()
-        .credentials(credentials)
-        .answerContent(content)
-        .build();
+  /** Starts an attempt, answers its single essay question, and finishes it. */
+  private void submitEssay(Credentials credentials, String content) {
+    StartTestSessionDto started = testSessionService.startTestSession(testId, credentials);
+    testSessionService.finishTestSession(
+        testId,
+        started.getAttemptToken(),
+        ResponseEntryRequestDto.builder()
+            .responseEntryId(started.getCurrentQuestion().getResponseEntryId())
+            .answerContent(content)
+            .build());
   }
 }

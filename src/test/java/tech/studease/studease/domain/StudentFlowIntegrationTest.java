@@ -11,8 +11,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.test.context.jdbc.Sql;
-import tech.studease.studease.api.questions.dto.QuestionDto;
+import tech.studease.studease.api.sessions.dto.CurrentQuestionDto;
 import tech.studease.studease.api.sessions.dto.ResponseEntryRequestDto;
+import tech.studease.studease.api.sessions.dto.StartTestSessionDto;
 import tech.studease.studease.api.sessions.dto.TestSessionDto;
 import tech.studease.studease.application.sessions.TestSessionService;
 import tech.studease.studease.common.event.TestSessionExpirySweeper;
@@ -99,9 +100,17 @@ class StudentFlowIntegrationTest extends PostgresIntegrationTest {
   void startAnswerAndFinishASession() {
     Credentials credentials = new Credentials("CS-1", "Student One");
 
-    QuestionDto first = testSessionService.startTestSession(testId, credentials);
-    assertThat(first).isNotNull();
-    assertThat(first.getContent()).isNotBlank();
+    StartTestSessionDto started = testSessionService.startTestSession(testId, credentials);
+    assertThat(started.getAttemptToken()).isNotBlank();
+    assertThat(started.getSessionKey()).isNotNull();
+    assertThat(started.getEndsAt()).isNotNull();
+
+    String token = started.getAttemptToken();
+    CurrentQuestionDto first = started.getCurrentQuestion();
+    assertThat(first.getQuestion().getContent()).isNotBlank();
+    assertThat(first.getResponseEntryId()).isNotNull();
+    assertThat(first.getQuestionNumber()).isEqualTo(1);
+    assertThat(first.getTotalQuestions()).isEqualTo(2);
 
     sessionId =
         testSessionRepository
@@ -109,11 +118,12 @@ class StudentFlowIntegrationTest extends PostgresIntegrationTest {
             .orElseThrow()
             .getId();
 
-    QuestionDto second = testSessionService.nextQuestion(testId, answerFor(credentials, first));
-    assertThat(second.getContent()).isNotBlank();
+    CurrentQuestionDto second = testSessionService.nextQuestion(testId, token, answerFor(first));
+    assertThat(second.getQuestion().getContent()).isNotBlank();
+    assertThat(second.getQuestionNumber()).isEqualTo(2);
 
     TestSessionDto finished =
-        testSessionService.finishTestSession(testId, answerFor(credentials, second));
+        testSessionService.finishTestSession(testId, token, answerFor(second));
     assertThat(finished.getFinishedAt()).isNotNull();
 
     TestSession persisted = testSessionRepository.findById(sessionId).orElseThrow();
@@ -139,15 +149,20 @@ class StudentFlowIntegrationTest extends PostgresIntegrationTest {
     assertThat(persisted.getMark()).isNotNull();
   }
 
-  private ResponseEntryRequestDto answerFor(Credentials credentials, QuestionDto question) {
+  private ResponseEntryRequestDto answerFor(CurrentQuestionDto current) {
+    // isCorrect is null for students, so this falls through to the first option -- which is all
+    // this test needs: it exercises the flow, not the marking (see TestUtilsTest for that).
     List<Long> answerIds =
-        question.getAnswers().stream()
+        current.getQuestion().getAnswers().stream()
             .filter(a -> Boolean.TRUE.equals(a.getIsCorrect()))
             .map(a -> a.getId())
             .toList();
     return ResponseEntryRequestDto.builder()
-        .credentials(credentials)
-        .answerIds(answerIds.isEmpty() ? List.of(question.getAnswers().get(0).getId()) : answerIds)
+        .responseEntryId(current.getResponseEntryId())
+        .answerIds(
+            answerIds.isEmpty()
+                ? List.of(current.getQuestion().getAnswers().get(0).getId())
+                : answerIds)
         .build();
   }
 

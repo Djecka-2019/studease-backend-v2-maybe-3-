@@ -33,18 +33,19 @@ public class TestSessionExpirySweeper {
       }
       long secondsLeft = Duration.between(now, session.getEndsAt()).toSeconds();
       if (secondsLeft > 0) {
-        broadcaster.sendTick(session.getId(), secondsLeft);
+        broadcaster.sendTick(session.getSessionKey(), secondsLeft);
       } else {
-        forceEnd(session.getId());
+        forceEnd(session);
       }
     }
   }
 
-  private void forceEnd(Long sessionId) {
+  private void forceEnd(TestSession session) {
     try {
-      broadcaster.sendForceEnd(sessionId, testSessionService.forceEndTestSession(sessionId));
+      broadcaster.sendForceEnd(
+          session.getSessionKey(), testSessionService.forceEndTestSession(session.getId()));
     } catch (RuntimeException ex) {
-      log.warn("Failed to force-end expired test session {}", sessionId, ex);
+      log.warn("Failed to force-end expired test session {}", session.getId(), ex);
     }
   }
 }

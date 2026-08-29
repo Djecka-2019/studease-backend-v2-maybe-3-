@@ -7,21 +7,27 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tech.studease.studease.api.questions.dto.QuestionDto;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import tech.studease.studease.api.sessions.dto.CurrentQuestionDto;
 import tech.studease.studease.api.sessions.dto.ResponseEntryRequestDto;
+import tech.studease.studease.api.sessions.dto.StartTestSessionDto;
 import tech.studease.studease.api.sessions.dto.TestSessionDto;
 import tech.studease.studease.api.sessions.dto.TestSessionListDto;
 import tech.studease.studease.application.questions.mapper.QuestionMapper;
 import tech.studease.studease.application.sessions.TestSessionService;
 import tech.studease.studease.application.sessions.mapper.TestSessionMapper;
 import tech.studease.studease.common.event.TestSessionTimerBroadcaster;
+import tech.studease.studease.common.security.AttemptTokens;
 import tech.studease.studease.common.util.TestUtils;
 import tech.studease.studease.domain.answers.Answer;
 import tech.studease.studease.domain.questions.Question;
@@ -30,6 +36,7 @@ import tech.studease.studease.domain.samples.Sample;
 import tech.studease.studease.domain.sessions.ResponseEntry;
 import tech.studease.studease.domain.sessions.TestSession;
 import tech.studease.studease.domain.sessions.TestSessionRepository;
+import tech.studease.studease.domain.sessions.exception.InvalidAttemptTokenException;
 import tech.studease.studease.domain.sessions.exception.TestSessionAlreadyExistsException;
 import tech.studease.studease.domain.sessions.exception.TestSessionNotFoundException;
 import tech.studease.studease.domain.tests.Test;
@@ -47,6 +54,8 @@ public class TestSessionServiceImpl implements TestSessionService {
   private final QuestionMapper questionMapper;
   private final TestSessionMapper testSessionMapper;
   private final TestSessionTimerBroadcaster timerBroadcaster;
+
+  // --- admin reads ---
 
   @Override
   @Transactional(readOnly = true)
@@ -69,28 +78,12 @@ public class TestSessionServiceImpl implements TestSessionService {
     return testSessionMapper.toTestSessionListDto(testSession);
   }
 
-  @Override
-  @Transactional(readOnly = true)
-  public TestSessionDto findByTestIdAndCredentialsForStudent(UUID testId, Credentials credentials) {
-    TestSession testSession =
-        testSessionRepository
-            .findTestSessionByStudentGroupAndStudentNameAndTestId(
-                credentials.studentGroup(), credentials.studentName(), testId)
-            .orElseThrow(
-                () ->
-                    new TestSessionNotFoundException(
-                        credentials.studentGroup(), credentials.studentName()));
-    return testSessionMapper.toTestSessionDto(testSession, false, false);
-  }
+  // --- student flow ---
 
   @Override
-  public QuestionDto startTestSession(UUID testId, Credentials credentials) {
+  public StartTestSessionDto startTestSession(UUID testId, Credentials credentials) {
     String studentGroup = credentials.studentGroup();
     String studentName = credentials.studentName();
-    if (testSessionRepository.existsByStudentGroupAndStudentNameAndTestId(
-        studentGroup, studentName, testId)) {
-      throw new TestSessionAlreadyExistsException(studentGroup, studentName);
-    }
 
     Test test =
         testRepository.getTestById(testId).orElseThrow(() -> new TestNotFoundException(testId));
@@ -103,6 +96,7 @@ public class TestSessionServiceImpl implements TestSessionService {
     }
 
     LocalDateTime startedAt = LocalDateTime.now();
+    String attemptToken = AttemptTokens.newToken();
     TestSession testSession =
         TestSession.builder()
             .studentGroup(studentGroup)
@@ -110,6 +104,8 @@ public class TestSessionServiceImpl implements TestSessionService {
             .startedAt(startedAt)
             .endsAt(startedAt.plusMinutes(test.getMinutesToComplete()))
             .currentQuestionIndex(0)
+            .attemptTokenHash(AttemptTokens.hash(attemptToken))
+            .sessionKey(UUID.randomUUID())
             .test(test)
             .build();
 
@@ -119,54 +115,70 @@ public class TestSessionServiceImpl implements TestSessionService {
     Collections.shuffle(responses);
     testSession.setResponses(responses);
 
-    testSessionRepository.save(testSession);
-    timerBroadcaster.sendTick(
-        testSession.getId(), Duration.between(startedAt, testSession.getEndsAt()).toSeconds());
+    // One attempt per student per test is enforced by a unique index, not by a preceding
+    // existsBy(...) check: that check-then-insert had nothing behind it, so two concurrent starts
+    // both passed it and created attempts with different sampled questions.
+    try {
+      testSessionRepository.saveAndFlush(testSession);
+    } catch (DataIntegrityViolationException ex) {
+      throw new TestSessionAlreadyExistsException(studentGroup, studentName);
+    }
 
-    return questionMapper.toQuestionDto(nextResponseEntry(testSession).getQuestion(), false);
+    // Outside the transaction: a STOMP send has no business holding a database connection, and
+    // broadcasting for a transaction that later rolls back would be a lie.
+    UUID sessionKey = testSession.getSessionKey();
+    long secondsLeft = Duration.between(startedAt, testSession.getEndsAt()).toSeconds();
+    afterCommit(() -> timerBroadcaster.sendTick(sessionKey, secondsLeft));
+
+    return StartTestSessionDto.builder()
+        .attemptToken(attemptToken)
+        .sessionKey(sessionKey)
+        .endsAt(testSession.getEndsAt())
+        .currentQuestion(toCurrentQuestion(testSession, nextResponseEntry(testSession)))
+        .build();
   }
 
   @Override
-  public QuestionDto getCurrentQuestion(UUID testId, Credentials credentials) {
-    TestSession testSession =
-        testSessionRepository
-            .findTestSessionByStudentGroupAndStudentNameAndTestId(
-                credentials.studentGroup(), credentials.studentName(), testId)
-            .orElseThrow(
-                () ->
-                    new TestSessionNotFoundException(
-                        credentials.studentGroup(), credentials.studentName()));
-    return questionMapper.toQuestionDto(nextResponseEntry(testSession).getQuestion(), false);
+  @Transactional(readOnly = true)
+  public TestSessionDto findByAttemptToken(UUID testId, String attemptToken) {
+    return testSessionMapper.toTestSessionDto(requireAttempt(testId, attemptToken), true, false);
   }
 
   @Override
-  public QuestionDto nextQuestion(UUID testId, ResponseEntryRequestDto responseEntryRequestDto) {
-    TestSession testSession = updateWithAnswer(testId, responseEntryRequestDto);
+  @Transactional(readOnly = true)
+  public CurrentQuestionDto getCurrentQuestion(UUID testId, String attemptToken) {
+    TestSession testSession = requireAttempt(testId, attemptToken);
+    return toCurrentQuestion(testSession, nextResponseEntry(testSession));
+  }
 
+  @Override
+  public CurrentQuestionDto nextQuestion(
+      UUID testId, String attemptToken, ResponseEntryRequestDto responseEntryRequestDto) {
+    TestSession testSession = requireAttempt(testId, attemptToken);
+    if (testSession.getFinishedAt() != null) {
+      throw new IllegalStateException("This attempt is already finished");
+    }
+    applyAnswer(testSession, responseEntryRequestDto);
     testSession.setCurrentQuestionIndex(answeredCount(testSession));
-    testSessionRepository.save(testSession);
-
-    return questionMapper.toQuestionDto(nextResponseEntry(testSession).getQuestion(), false);
-  }
-
-  /** The single source of truth for quiz position: how many responses have been answered so far. */
-  private static int answeredCount(TestSession testSession) {
-    return (int)
-        testSession.getResponses().stream().filter(TestSessionServiceImpl::isAnswered).count();
+    return toCurrentQuestion(testSession, nextResponseEntry(testSession));
   }
 
   @Override
   public TestSessionDto finishTestSession(
-      UUID testId, ResponseEntryRequestDto responseEntryRequestDto) {
-    TestSession testSession = updateWithAnswer(testId, responseEntryRequestDto);
+      UUID testId, String attemptToken, ResponseEntryRequestDto responseEntryRequestDto) {
+    TestSession testSession = requireAttempt(testId, attemptToken);
 
+    // Replayable before: a second finish overwrote finishedAt and recomputed the mark.
+    if (testSession.getFinishedAt() != null) {
+      return testSessionMapper.toTestSessionDto(testSession, true, false);
+    }
+
+    applyAnswer(testSession, responseEntryRequestDto);
     testSession.setFinishedAt(LocalDateTime.now());
+    testSession.setCurrentQuestionIndex(answeredCount(testSession));
+    testSession.setMark(getMarkForSession(testSession, testSession.getTest()));
 
-    Test test =
-        testRepository.findById(testId).orElseThrow(() -> new TestNotFoundException(testId));
-    testSession.setMark(getMarkForSession(testSession, test));
-
-    return testSessionMapper.toTestSessionDto(testSessionRepository.save(testSession), true, false);
+    return testSessionMapper.toTestSessionDto(testSession, true, false);
   }
 
   @Override
@@ -176,38 +188,73 @@ public class TestSessionServiceImpl implements TestSessionService {
             .findById(testSessionId)
             .orElseThrow(() -> new TestSessionNotFoundException(testSessionId));
 
-    testSession.setFinishedAt(LocalDateTime.now());
-    testSession.setMark(getMarkForSession(testSession, testSession.getTest()));
-
-    return testSessionMapper.toTestSessionDto(testSessionRepository.save(testSession), true, false);
-  }
-
-  private int getMarkForSession(TestSession testSession, Test test) {
-    int mark;
-    if (test.getMaximumScore() == null) {
-      mark = testSession.getResponses().stream().mapToInt(TestUtils::calculateMark).sum();
-    } else {
-      mark =
-          testSession.getResponses().stream().mapToInt(TestUtils::calculateMark).sum()
-              * test.getMaximumScore()
-              / getMaxScore(test.getQuestions(), test.getSamples());
+    if (testSession.getFinishedAt() == null) {
+      testSession.setFinishedAt(LocalDateTime.now());
+      testSession.setMark(getMarkForSession(testSession, testSession.getTest()));
     }
-    return mark;
+    return testSessionMapper.toTestSessionDto(testSession, true, false);
   }
 
-  private void saveAnswers(TestSession testSession, List<Long> answerIds) {
-    ResponseEntry responseEntry = nextResponseEntry(testSession);
+  // --- internals ---
+
+  /**
+   * Resolves the attempt a token names and checks it belongs to the test in the path, so a token
+   * for one test cannot be used against another. An unknown token and a mismatched one fail
+   * identically: telling them apart would let a caller probe for valid tokens.
+   */
+  private TestSession requireAttempt(UUID testId, String attemptToken) {
+    if (attemptToken == null || attemptToken.isBlank()) {
+      throw new InvalidAttemptTokenException();
+    }
+    TestSession testSession =
+        testSessionRepository
+            .findByAttemptTokenHash(AttemptTokens.hash(attemptToken))
+            .orElseThrow(InvalidAttemptTokenException::new);
+    if (!Objects.equals(testSession.getTest().getId(), testId)) {
+      throw new InvalidAttemptTokenException();
+    }
+    return testSession;
+  }
+
+  private void applyAnswer(TestSession testSession, ResponseEntryRequestDto request) {
+    ResponseEntry responseEntry = requireResponseEntry(testSession, request.getResponseEntryId());
+    if (request.getAnswerContent() != null) {
+      saveEssayAnswer(responseEntry, request.getAnswerContent());
+    } else {
+      saveChoiceAnswers(responseEntry, request.getAnswerIds());
+    }
+  }
+
+  /**
+   * The entry the client named, scoped to this attempt. The server used to infer the target as "the
+   * first response with no answers yet", so a retried request attached its answer to the next
+   * question instead and silently dropped a submission.
+   */
+  private static ResponseEntry requireResponseEntry(TestSession testSession, Long responseEntryId) {
+    return testSession.getResponses().stream()
+        .filter(entry -> Objects.equals(entry.getId(), responseEntryId))
+        .findFirst()
+        .orElseThrow(
+            () ->
+                new IllegalArgumentException(
+                    "responseEntryId " + responseEntryId + " is not part of this attempt"));
+  }
+
+  private void saveChoiceAnswers(ResponseEntry responseEntry, List<Long> answerIds) {
     if (responseEntry.getQuestion().getType() == QuestionType.ESSAY) {
       throw new IllegalArgumentException("Answer must be a text");
     }
-
-    List<Answer> answers = new ArrayList<>(responseEntry.getQuestion().getAnswers());
-    answers =
-        answers.stream().filter(a -> answerIds.contains(a.getId())).collect(Collectors.toList());
-    if (answers.isEmpty()) {
+    if (answerIds == null || answerIds.isEmpty()) {
       throw new IllegalArgumentException("Answers must not be empty");
     }
 
+    List<Answer> answers =
+        responseEntry.getQuestion().getAnswers().stream()
+            .filter(answer -> answerIds.contains(answer.getId()))
+            .collect(Collectors.toList());
+    if (answers.isEmpty()) {
+      throw new IllegalArgumentException("Answers must not be empty");
+    }
     if (responseEntry.getQuestion().getType() == QuestionType.SINGLE_CHOICE && answers.size() > 1) {
       throw new IllegalArgumentException("Only one answer is allowed for SINGLE_CHOICE questions");
     }
@@ -215,28 +262,7 @@ public class TestSessionServiceImpl implements TestSessionService {
     responseEntry.setAnswers(answers);
   }
 
-  private TestSession updateWithAnswer(
-      UUID testId, ResponseEntryRequestDto responseEntryRequestDto) {
-    Credentials credentials = responseEntryRequestDto.getCredentials();
-    TestSession testSession =
-        testSessionRepository
-            .findTestSessionByStudentGroupAndStudentNameAndTestId(
-                credentials.studentGroup(), credentials.studentName(), testId)
-            .orElseThrow(
-                () ->
-                    new TestSessionNotFoundException(
-                        credentials.studentGroup(), credentials.studentName()));
-
-    if (responseEntryRequestDto.getAnswerContent() != null) {
-      saveAnswers(testSession, responseEntryRequestDto.getAnswerContent());
-    } else {
-      saveAnswers(testSession, responseEntryRequestDto.getAnswerIds());
-    }
-    return testSession;
-  }
-
-  private void saveAnswers(TestSession testSession, String answerContent) {
-    ResponseEntry responseEntry = nextResponseEntry(testSession);
+  private void saveEssayAnswer(ResponseEntry responseEntry, String answerContent) {
     if (responseEntry.getQuestion().getType() != QuestionType.ESSAY) {
       throw new IllegalArgumentException("Answer must not be a text");
     }
@@ -244,6 +270,25 @@ public class TestSessionServiceImpl implements TestSessionService {
     // to the SHARED question, which leaked every student's essay to everyone else who was later
     // served that question, and let an admin's question edit orphan-remove submitted work.
     responseEntry.setEssayAnswer(answerContent);
+  }
+
+  private CurrentQuestionDto toCurrentQuestion(TestSession testSession, ResponseEntry entry) {
+    List<ResponseEntry> responses = testSession.getResponses();
+    return CurrentQuestionDto.builder()
+        .responseEntryId(entry.getId())
+        .question(questionMapper.toQuestionDto(entry.getQuestion(), false))
+        .questionNumber(responses.indexOf(entry) + 1)
+        .totalQuestions(responses.size())
+        .build();
+  }
+
+  private int getMarkForSession(TestSession testSession, Test test) {
+    int rawMark = testSession.getResponses().stream().mapToInt(TestUtils::calculateMark).sum();
+    if (test.getMaximumScore() == null) {
+      return rawMark;
+    }
+    int maxScore = getMaxScore(test.getQuestions(), test.getSamples());
+    return maxScore == 0 ? 0 : rawMark * test.getMaximumScore() / maxScore;
   }
 
   private void addTestQuestions(
@@ -287,11 +332,17 @@ public class TestSessionServiceImpl implements TestSessionService {
     }
   }
 
-  private ResponseEntry nextResponseEntry(TestSession testSession) {
+  private static ResponseEntry nextResponseEntry(TestSession testSession) {
     return testSession.getResponses().stream()
-        .filter(r -> !isAnswered(r))
+        .filter(entry -> !isAnswered(entry))
         .findFirst()
         .orElseThrow(() -> new IllegalStateException("No more questions"));
+  }
+
+  /** The single source of truth for quiz position: how many responses have been answered so far. */
+  private static int answeredCount(TestSession testSession) {
+    return (int)
+        testSession.getResponses().stream().filter(TestSessionServiceImpl::isAnswered).count();
   }
 
   /**
@@ -301,5 +352,19 @@ public class TestSessionServiceImpl implements TestSessionService {
    */
   private static boolean isAnswered(ResponseEntry responseEntry) {
     return !responseEntry.getAnswers().isEmpty() || responseEntry.getEssayAnswer() != null;
+  }
+
+  private static void afterCommit(Runnable action) {
+    if (TransactionSynchronizationManager.isSynchronizationActive()) {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+              action.run();
+            }
+          });
+    } else {
+      action.run();
+    }
   }
 }

@@ -8,6 +8,7 @@ import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBr
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 import tech.studease.studease.common.config.properties.CorsProperties;
+import tech.studease.studease.domain.sessions.TestSessionRepository;
 
 @Configuration
 @EnableWebSocketMessageBroker
@@ -15,6 +16,7 @@ import tech.studease.studease.common.config.properties.CorsProperties;
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
   private final CorsProperties corsProperties;
+  private final TestSessionRepository testSessionRepository;
 
   @Override
   public void registerStompEndpoints(StompEndpointRegistry registry) {
@@ -25,13 +27,12 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
   @Override
   public void configureMessageBroker(MessageBrokerRegistry registry) {
-    registry.enableSimpleBroker("/topic", "/user", "/queue");
-    registry.setUserDestinationPrefix("/user");
+    registry.enableSimpleBroker("/topic");
     registry.setApplicationDestinationPrefixes("/api/v1");
   }
 
   @Override
   public void configureClientInboundChannel(ChannelRegistration registration) {
-    registration.interceptors(new StompInboundGuard());
+    registration.interceptors(new StompInboundGuard(testSessionRepository));
   }
 }

@@ -21,6 +21,8 @@ public abstract class TestSessionMapper {
       TestSession testSession, boolean includeResponses, boolean isAdmin) {
     return TestSessionDto.builder()
         .sessionId(testSession.getId().toString())
+        // Only the owner needs the WebSocket key; an admin listing every attempt does not.
+        .sessionKey(isAdmin ? null : testSession.getSessionKey())
         .studentGroup(testSession.getStudentGroup())
         .studentName(testSession.getStudentName())
         .startedAt(testSession.getStartedAt())
