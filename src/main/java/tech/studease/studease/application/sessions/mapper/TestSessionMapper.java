@@ -9,8 +9,6 @@ import tech.studease.studease.api.sessions.dto.TestSessionDto;
 import tech.studease.studease.api.sessions.dto.TestSessionListDto;
 import tech.studease.studease.application.questions.mapper.QuestionMapper;
 import tech.studease.studease.domain.answers.Answer;
-import tech.studease.studease.domain.answers.Essay;
-import tech.studease.studease.domain.questions.QuestionType;
 import tech.studease.studease.domain.sessions.ResponseEntry;
 import tech.studease.studease.domain.sessions.TestSession;
 
@@ -62,10 +60,10 @@ public abstract class TestSessionMapper {
                         responseEntry.getAnswers().stream()
                             .map(Answer::getId)
                             .collect(Collectors.toList()))
-                    .answerContent(
-                        responseEntry.getQuestion().getType() == QuestionType.ESSAY
-                            ? ((Essay) responseEntry.getAnswers().getFirst()).getContent()
-                            : null)
+                    // Reads the attempt's own field. The old expression called getFirst() on the
+                    // answers list without checking it was populated, so finishing a test with any
+                    // essay left blank threw NoSuchElementException -> 500.
+                    .answerContent(responseEntry.getEssayAnswer())
                     .build())
         .collect(Collectors.toList());
   }

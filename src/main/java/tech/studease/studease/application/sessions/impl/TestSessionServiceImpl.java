@@ -24,8 +24,6 @@ import tech.studease.studease.application.sessions.mapper.TestSessionMapper;
 import tech.studease.studease.common.event.TestSessionTimerBroadcaster;
 import tech.studease.studease.common.util.TestUtils;
 import tech.studease.studease.domain.answers.Answer;
-import tech.studease.studease.domain.answers.AnswerRepository;
-import tech.studease.studease.domain.answers.Essay;
 import tech.studease.studease.domain.questions.Question;
 import tech.studease.studease.domain.questions.QuestionType;
 import tech.studease.studease.domain.samples.Sample;
@@ -46,7 +44,6 @@ public class TestSessionServiceImpl implements TestSessionService {
 
   private final TestSessionRepository testSessionRepository;
   private final TestRepository testRepository;
-  private final AnswerRepository answerRepository;
   private final QuestionMapper questionMapper;
   private final TestSessionMapper testSessionMapper;
   private final TestSessionTimerBroadcaster timerBroadcaster;
@@ -154,7 +151,8 @@ public class TestSessionServiceImpl implements TestSessionService {
 
   /** The single source of truth for quiz position: how many responses have been answered so far. */
   private static int answeredCount(TestSession testSession) {
-    return (int) testSession.getResponses().stream().filter(r -> !r.getAnswers().isEmpty()).count();
+    return (int)
+        testSession.getResponses().stream().filter(TestSessionServiceImpl::isAnswered).count();
   }
 
   @Override
@@ -242,21 +240,10 @@ public class TestSessionServiceImpl implements TestSessionService {
     if (responseEntry.getQuestion().getType() != QuestionType.ESSAY) {
       throw new IllegalArgumentException("Answer must not be a text");
     }
-
-    List<Answer> existing = responseEntry.getAnswers();
-    if (existing != null && !existing.isEmpty() && existing.get(0) instanceof Essay essay) {
-      essay.setContent(answerContent);
-      return;
-    }
-
-    Essay essayAnswer =
-        Essay.builder()
-            .isCorrect(true)
-            .content(answerContent)
-            .question(responseEntry.getQuestion())
-            .build();
-    answerRepository.save(essayAnswer);
-    responseEntry.setAnswers(new ArrayList<>(List.of(essayAnswer)));
+    // Straight onto the student's own response entry. This used to create an Answer row parented
+    // to the SHARED question, which leaked every student's essay to everyone else who was later
+    // served that question, and let an admin's question edit orphan-remove submitted work.
+    responseEntry.setEssayAnswer(answerContent);
   }
 
   private void addTestQuestions(
@@ -302,8 +289,17 @@ public class TestSessionServiceImpl implements TestSessionService {
 
   private ResponseEntry nextResponseEntry(TestSession testSession) {
     return testSession.getResponses().stream()
-        .filter(r -> r.getAnswers().isEmpty())
+        .filter(r -> !isAnswered(r))
         .findFirst()
         .orElseThrow(() -> new IllegalStateException("No more questions"));
+  }
+
+  /**
+   * Whether the student has responded to this entry. Choice and matching answers land in the {@code
+   * answers} join table; an essay lands in {@code essayAnswer} and never touches it, so checking
+   * only the collection would serve an answered essay question forever.
+   */
+  private static boolean isAnswered(ResponseEntry responseEntry) {
+    return !responseEntry.getAnswers().isEmpty() || responseEntry.getEssayAnswer() != null;
   }
 }

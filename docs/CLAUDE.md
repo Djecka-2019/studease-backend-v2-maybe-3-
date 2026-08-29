@@ -37,8 +37,13 @@ On Windows use `./gradlew` from the Bash tool, or `gradlew.bat` from PowerShell.
   `JwtUtilsTest`, `TestUtilsTest`) use in-memory **H2** — config in `src/test/resources/application.properties`
   (dummy secrets, `ddl-auto=create-drop`, rate limiting off). No profile is active for tests.
 - Integration tests extend `support/PostgresIntegrationTest` — a shared **Testcontainers**
-  `postgres:16-alpine`. These auto-skip when Docker is unavailable (`disabledWithoutDocker = true`),
-  so `./gradlew build` still passes locally without Docker; CI always runs them.
+  `postgres:16-alpine` whose schema is built by **Liquibase** and then checked by
+  `ddl-auto=validate`, so a changeset that drifts from the entity model fails every one of them.
+  They auto-skip when Docker is unavailable (`disabledWithoutDocker = true`), so `./gradlew build`
+  still passes locally without Docker; CI always runs them.
+- Testcontainers is pinned to **1.20.6** (overriding the Boot BOM) and the test task sets
+  `api.version=1.41`. The BOM's 1.19.8 ships docker-java 3.3.6, which requests Docker API 1.32 —
+  below the 1.40 floor of Docker Engine 29.x — so every integration test **silently skipped**.
 - H2's `MODE=PostgreSQL` was deliberately removed: `Question.type` is an un-`@Enumerated` enum that
   Hibernate maps to `TINYINT`, which PG-mode H2 rejects. Real-schema fidelity is covered by the
   Testcontainers tests only.
@@ -88,8 +93,11 @@ appears as a sub-package in all four layers. Controllers depend on **service int
 - `TestSession` = one student's attempt: `studentGroup` + `studentName` identity, `startedAt`,
   persisted `endsAt` (= `startedAt + minutesToComplete`), `finishedAt`, `mark`, and a
   `List<ResponseEntry>` (one per assigned question, holding the chosen `Answer`s).
-- `Answer` is a `SINGLE_TABLE` hierarchy: `Choice`, `Essay`, `MatchingPair`. Marking logic lives in
-  `common/util/TestUtils`.
+- `Answer` is a `SINGLE_TABLE` hierarchy: `Choice`, `MatchingPair`, and the `@Deprecated` `Essay`.
+  Answer rows belong to a `Question` and are **shared by every attempt**, so they must only ever
+  hold author-authored options. A student's essay text is per-attempt and lives on
+  `ResponseEntry.essayAnswer`; writing it to `Answer` is what leaked one student's work to the
+  next. Marking logic lives in `common/util/TestUtils`.
 
 ### Two kinds of caller
 
@@ -128,7 +136,11 @@ never cookie.
 - Fetch plans use `@EntityGraph`/JPQL fetch-joins. **Never put two bag (`List`) collections in one
   graph** — `MultipleBagFetchException`. Prefer query-scoped ownership checks
   (`findByIdAndAuthorEmail`, `existsByIdAndAuthorEmail`) over load-then-compare.
-- `ddl-auto=update` (Flyway migration is deferred to its own PR — do not add ad-hoc schema code).
+- **Liquibase owns the schema** (`src/main/resources/db/changelog/`, master changelog
+  `db.changelog-master.xml`); `ddl-auto=validate`. Never hand-edit a deployed changeset — append a
+  new one. `001-baseline` carries a precondition that MARK_RANs it on a database that already has
+  the schema, so no manual `changelog-sync` is needed on first deploy. Regenerate the reference
+  DDL with `./gradlew test --tests "*SchemaBaselineExportTool*" -Dschema.export=true`.
 - Current user is obtained via the injected `common/security/CurrentUser` bean, **not** static
   `SecurityContextHolder` access.
 

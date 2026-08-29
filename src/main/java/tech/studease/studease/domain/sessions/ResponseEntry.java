@@ -1,5 +1,6 @@
 package tech.studease.studease.domain.sessions;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.ForeignKey;
@@ -60,6 +61,18 @@ public class ResponseEntry {
                       foreignKeyDefinition =
                           "FOREIGN KEY (answers_id) REFERENCES answer(id) ON DELETE CASCADE")))
   private List<Answer> answers;
+
+  /**
+   * The student's free-text answer for an ESSAY question, owned by this attempt.
+   *
+   * <p>It used to be persisted as an {@code Essay} row hanging off the shared {@link Question},
+   * which meant {@code question.answers} accumulated every student's essay and the question mapper
+   * served all of them back to every other student. Essay text is per-attempt data and belongs
+   * here. Choice/matching selections stay in {@link #answers}: those reference the question's own
+   * immutable option rows, which is correct to share.
+   */
+  @Column(length = 10_000)
+  private String essayAnswer;
 
   @ManyToOne(fetch = FetchType.LAZY)
   @JoinColumn(

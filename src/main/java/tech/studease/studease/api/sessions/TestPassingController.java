@@ -1,5 +1,6 @@
 package tech.studease.studease.api.sessions;
 
+import jakarta.validation.Valid;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -51,13 +52,13 @@ public class TestPassingController {
 
   @PostMapping("{testId}/next-question")
   public ResponseEntity<QuestionDto> getNextQuestion(
-      @PathVariable UUID testId, @RequestBody ResponseEntryRequestDto requestDto) {
+      @PathVariable UUID testId, @Valid @RequestBody ResponseEntryRequestDto requestDto) {
     return ResponseEntity.ok(testSessionService.nextQuestion(testId, requestDto));
   }
 
   @PostMapping("{testId}/finish")
   public ResponseEntity<TestSessionDto> finishTest(
-      @PathVariable UUID testId, @RequestBody ResponseEntryRequestDto requestDto) {
+      @PathVariable UUID testId, @Valid @RequestBody ResponseEntryRequestDto requestDto) {
     return ResponseEntity.ok(testSessionService.finishTestSession(testId, requestDto));
   }
 }

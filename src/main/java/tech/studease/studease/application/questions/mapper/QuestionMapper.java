@@ -3,6 +3,7 @@ package tech.studease.studease.application.questions.mapper;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import org.mapstruct.AfterMapping;
 import org.mapstruct.Context;
@@ -16,7 +17,6 @@ import tech.studease.studease.api.questions.dto.QuestionDto;
 import tech.studease.studease.api.questions.dto.QuestionListDto;
 import tech.studease.studease.domain.answers.Answer;
 import tech.studease.studease.domain.answers.Choice;
-import tech.studease.studease.domain.answers.Essay;
 import tech.studease.studease.domain.answers.MatchingPair;
 import tech.studease.studease.domain.questions.Question;
 import tech.studease.studease.domain.questions.QuestionType;
@@ -43,6 +43,11 @@ public interface QuestionMapper {
   @AfterMapping
   default void setAnswers(@MappingTarget Question question, QuestionDto questionDto) {
     List<Answer> answers = new ArrayList<>();
+    if (questionDto.getAnswers() == null) {
+      // Valid for ESSAY: AnswersValidator does not require options for it.
+      question.setAnswers(answers);
+      return;
+    }
     for (AnswerDto answerDto : questionDto.getAnswers()) {
       if (question.getType() == QuestionType.MATCHING) {
         questionDto
@@ -94,32 +99,40 @@ public interface QuestionMapper {
   @AfterMapping
   default void setAnswerDtos(
       @MappingTarget QuestionDto questionDto, Question question, @Context boolean isAdmin) {
+    // An essay question has no answer options to offer. The only rows that were ever attached to
+    // one were students' submitted essays -- serialising them here is what showed student A's
+    // answer to student B. Essay text now lives on ResponseEntry and is returned per attempt.
+    if (question.getType() == QuestionType.ESSAY) {
+      questionDto.setAnswers(List.of());
+      return;
+    }
+
     List<AnswerDto> answerDtos =
         question.getAnswers().stream()
-            .map(
-                answer -> {
-                  if (answer instanceof MatchingPair matchingPair) {
-                    return AnswerDto.builder()
-                        .id(matchingPair.getId())
-                        .leftOption(matchingPair.getLeftOption())
-                        .rightOption(matchingPair.getRightOption())
-                        .isCorrect(isAdmin ? matchingPair.getIsCorrect() : null)
-                        .build();
-                  } else if (answer instanceof Choice choice) {
-                    return AnswerDto.builder()
-                        .id(choice.getId())
-                        .content(choice.getContent())
-                        .isCorrect(isAdmin ? choice.getIsCorrect() : null)
-                        .build();
-                  } else {
-                    Essay essay = (Essay) answer;
-                    return AnswerDto.builder()
-                        .id(essay.getId())
-                        .content(essay.getContent())
-                        .build();
-                  }
-                })
+            .map(answer -> toAnswerDto(answer, isAdmin))
+            .filter(Objects::nonNull)
             .toList();
     questionDto.setAnswers(answerDtos);
+  }
+
+  /** Returns {@code null} for anything that is not a presentable option, so it is filtered out. */
+  private static AnswerDto toAnswerDto(Answer answer, boolean isAdmin) {
+    if (answer instanceof MatchingPair matchingPair) {
+      return AnswerDto.builder()
+          .id(matchingPair.getId())
+          .leftOption(matchingPair.getLeftOption())
+          .rightOption(matchingPair.getRightOption())
+          .isCorrect(isAdmin ? matchingPair.getIsCorrect() : null)
+          .build();
+    }
+    if (answer instanceof Choice choice) {
+      return AnswerDto.builder()
+          .id(choice.getId())
+          .content(choice.getContent())
+          .isCorrect(isAdmin ? choice.getIsCorrect() : null)
+          .build();
+    }
+    // Legacy Essay rows during rollout, or any future subtype: not an option, never emitted.
+    return null;
   }
 }

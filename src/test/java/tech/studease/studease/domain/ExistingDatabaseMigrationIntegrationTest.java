@@ -24,15 +24,17 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
  * The production rollout path, and the riskiest step in adopting Liquibase: the live database
- * <em>already has</em> the schema, built years ago by {@code ddl-auto=update}. Applying the
- * baseline there would fail on "table already exists".
+ * <em>already has</em> the schema, built by {@code ddl-auto=update}, and it holds real student
+ * work. Applying the baseline there would fail on "table already exists", and a careless essay
+ * migration would destroy submitted answers.
  *
- * <p>This test seeds a container with the pre-Liquibase schema <em>before</em> Spring starts, then
- * boots the application against it and asserts that
+ * <p>This test seeds a container with the pre-Liquibase schema <em>and legacy essay data</em>
+ * before Spring starts, then boots the application against it and asserts that
  *
  * <ul>
  *   <li>{@code 001-baseline} is recorded as {@code MARK_RAN} — skipped, not executed;
  *   <li>{@code 002-indexes} really did run, so the indexes exist;
+ *   <li>{@code 003} moved every student's essay onto their own attempt, losing none of it;
  *   <li>Hibernate's {@code ddl-auto=validate} still accepts the result.
  * </ul>
  *
@@ -44,31 +46,66 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @Testcontainers(disabledWithoutDocker = true)
 class ExistingDatabaseMigrationIntegrationTest {
 
+  private static final String ESSAY_ONE = "First student essay that must survive the migration";
+  private static final String ESSAY_TWO = "Second student essay, same question, different author";
+
   private static final PostgreSQLContainer<?> POSTGRES =
       new PostgreSQLContainer<>("postgres:16-alpine");
 
   static {
     POSTGRES.start();
-    seedPreLiquibaseSchema();
+    execute(readBaselineDdl());
+    execute(legacyEssayData());
   }
 
   /**
-   * Replays the baseline DDL directly, standing in for a database that {@code ddl-auto=update}
-   * built before Liquibase existed. Liquibase's own bookkeeping tables are deliberately absent.
+   * Two students answered the same shared essay question. Under the old model both essays were rows
+   * in {@code answer} parented to that one question — which is exactly what leaked. The migration
+   * has to hand each essay back to the attempt that produced it.
    */
-  private static void seedPreLiquibaseSchema() {
-    String ddl = readBaselineDdl();
+  private static String legacyEssayData() {
+    return """
+        INSERT INTO public.test (id, name, open_date, deadline, minutes_to_complete)
+        VALUES ('11111111-1111-1111-1111-111111111111', 'Legacy quiz',
+                now() - interval '1 hour', now() + interval '1 hour', 30);
+
+        INSERT INTO public.question (id, content, points, type, test_id)
+        VALUES (500, 'Legacy essay question', 5, 3,
+                '11111111-1111-1111-1111-111111111111');
+
+        INSERT INTO public.test_session
+            (id, student_group, student_name, started_at, ends_at, current_question_index, test_id)
+        VALUES (600, 'CS-9', 'Student One', now(), now() + interval '30 minutes', 0,
+                '11111111-1111-1111-1111-111111111111'),
+               (601, 'CS-9', 'Student Two', now(), now() + interval '30 minutes', 0,
+                '11111111-1111-1111-1111-111111111111');
+
+        INSERT INTO public.response_entry (id, responses_order, question_id, test_session_id)
+        VALUES (700, 0, 500, 600),
+               (701, 0, 500, 601);
+
+        INSERT INTO public.answer (id, is_correct, question_id, dtype, content)
+        VALUES (800, true, 500, 'essay', '%s'),
+               (801, true, 500, 'essay', '%s');
+
+        INSERT INTO public.response_entry_answers (answers_id, response_entry_id)
+        VALUES (800, 700), (801, 701);
+        """
+        .formatted(ESSAY_ONE, ESSAY_TWO);
+  }
+
+  private static void execute(String sql) {
     try (Connection connection =
             DriverManager.getConnection(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
         Statement statement = connection.createStatement()) {
-      for (String sql : ddl.split(";")) {
-        if (!sql.isBlank()) {
-          statement.execute(sql);
+      for (String single : sql.split(";")) {
+        if (!single.isBlank()) {
+          statement.execute(single);
         }
       }
     } catch (SQLException ex) {
-      throw new IllegalStateException("could not seed the pre-Liquibase schema", ex);
+      throw new IllegalStateException("could not seed the pre-Liquibase database", ex);
     }
   }
 
@@ -81,11 +118,12 @@ class ExistingDatabaseMigrationIntegrationTest {
       if (in == null) {
         throw new IllegalStateException("001-baseline.sql not on the test classpath");
       }
-      return new String(in.readAllBytes(), StandardCharsets.UTF_8)
+      StringBuilder ddl = new StringBuilder();
+      new String(in.readAllBytes(), StandardCharsets.UTF_8)
           .lines()
           .filter(line -> !line.trim().startsWith("--"))
-          .reduce(new StringBuilder(), (sb, line) -> sb.append(line).append('\n'), (a, b) -> a)
-          .toString();
+          .forEach(line -> ddl.append(line).append('\n'));
+      return ddl.toString();
     } catch (IOException ex) {
       throw new IllegalStateException("could not read 001-baseline.sql", ex);
     }
@@ -107,7 +145,7 @@ class ExistingDatabaseMigrationIntegrationTest {
 
   @Test
   @Transactional(readOnly = true)
-  void baselineIsMarkedRanAndIndexesAreStillApplied() {
+  void baselineIsMarkedRanAndLaterChangesetsAreApplied() {
     @SuppressWarnings("unchecked")
     List<Object[]> rows =
         entityManager
@@ -141,5 +179,42 @@ class ExistingDatabaseMigrationIntegrationTest {
                 "idx_response_entry_test_session",
                 "idx_answer_question",
                 "idx_users_email"));
+  }
+
+  @Test
+  @Transactional(readOnly = true)
+  void everyLegacyEssayIsHandedBackToItsOwnAttempt() {
+    assertThat(essayAnswerOf(700))
+        .as("the first student's submitted work must survive the migration verbatim")
+        .isEqualTo(ESSAY_ONE);
+    assertThat(essayAnswerOf(701))
+        .as("and must not be confused with the other student's, on the same shared question")
+        .isEqualTo(ESSAY_TWO);
+  }
+
+  @Test
+  @Transactional(readOnly = true)
+  void theSharedEssayRowsAreGoneAfterBackfill() {
+    assertThat(countOf("SELECT COUNT(*) FROM answer WHERE dtype = 'essay'"))
+        .as("the leaking rows must be removed once their text has been relocated")
+        .isZero();
+    assertThat(
+            countOf(
+                "SELECT COUNT(*) FROM response_entry_answers rea"
+                    + " JOIN answer a ON a.id = rea.answers_id WHERE a.dtype = 'essay'"))
+        .as("and so must their join rows")
+        .isZero();
+  }
+
+  private String essayAnswerOf(long responseEntryId) {
+    return (String)
+        entityManager
+            .createNativeQuery("SELECT essay_answer FROM response_entry WHERE id = :id")
+            .setParameter("id", responseEntryId)
+            .getSingleResult();
+  }
+
+  private long countOf(String sql) {
+    return ((Number) entityManager.createNativeQuery(sql).getSingleResult()).longValue();
   }
 }
