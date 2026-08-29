@@ -26,6 +26,7 @@ repositories {
 dependencyManagement {
     imports {
         mavenBom("org.springframework.ai:spring-ai-bom:${libs.versions.spring.ai.get()}")
+        mavenBom("org.testcontainers:testcontainers-bom:${libs.versions.testcontainers.get()}")
     }
 }
 
@@ -33,6 +34,7 @@ dependencies {
     implementation(libs.spring.boot.starter.web)
     implementation(libs.spring.boot.starter.security)
     implementation(libs.spring.boot.starter.data.jpa)
+    implementation(libs.liquibase.core)
     implementation(libs.spring.boot.starter.websocket)
     implementation(libs.spring.boot.starter.validation)
     implementation(libs.spring.boot.starter.actuator)
@@ -82,6 +84,17 @@ tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    // Lets SchemaBaselineExportTool be run on demand:
+    //   ./gradlew test --tests "*SchemaBaselineExportTool*" -Dschema.export=true
+    systemProperty("schema.export", System.getProperty("schema.export") ?: "false")
+
+    // docker-java does not negotiate the Docker API version; it sends its own default, which is
+    // below the 1.40 minimum enforced by Docker Engine 29.x. Without this the daemon answers /info
+    // with a 400 and every Testcontainers test SKIPS silently (disabledWithoutDocker = true).
+    // 1.41 is Docker 20.10+, so it is safe on older CI runners too. Ambient env wins if set.
+    val dockerApiVersion = System.getenv("DOCKER_API_VERSION") ?: "1.41"
+    environment("DOCKER_API_VERSION", dockerApiVersion)
+    systemProperty("api.version", dockerApiVersion)
 }
 
 spotless {

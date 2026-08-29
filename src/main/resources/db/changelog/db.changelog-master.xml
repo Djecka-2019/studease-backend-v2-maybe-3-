@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+      Changesets are appended here in order and never edited once deployed.
+      001-baseline captures the pre-Liquibase schema and must be `changelog-sync`'d, not run,
+      against any database that already exists. See its header.
+    -->
+    <include file="db/changelog/changes/001-baseline.sql"/>
+    <include file="db/changelog/changes/002-indexes.sql"/>
+
+</databaseChangeLog>

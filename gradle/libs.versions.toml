@@ -13,6 +13,10 @@ jjwt = "0.12.6"
 bucket4j = "8.10.1"
 commons-csv = "1.12.0"
 logstash-logback-encoder = "8.0"
+# Overrides the Spring Boot BOM (1.19.8). docker-java 3.3.6 in 1.19.8 requests Docker API
+# 1.32, below the 1.40 minimum of Docker Engine 29.x, so every Testcontainers test would
+# silently SKIP (disabledWithoutDocker) instead of running.
+testcontainers = "1.20.6"
 
 [libraries]
 # --- BOM-managed (no version) ---
@@ -27,6 +31,7 @@ spring-boot-devtools = { module = "org.springframework.boot:spring-boot-devtools
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test" }
 spring-security-test = { module = "org.springframework.security:spring-security-test" }
 postgresql = { module = "org.postgresql:postgresql" }
+liquibase-core = { module = "org.liquibase:liquibase-core" }
 lombok = { module = "org.projectlombok:lombok" }
 
 # --- spring-ai BOM-managed (no version) ---
