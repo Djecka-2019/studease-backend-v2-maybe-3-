@@ -32,6 +32,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import tech.studease.studease.api.sessions.TestPassingController;
 import tech.studease.studease.application.users.AuthService;
 import tech.studease.studease.common.config.properties.CorsProperties;
 import tech.studease.studease.common.error.ErrorResponse;
@@ -98,7 +99,8 @@ public class SecurityConfig {
             HttpHeaders.CONTENT_TYPE,
             HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD,
             HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS,
-            HEADER_X_REQUESTED_WITH));
+            HEADER_X_REQUESTED_WITH,
+            TestPassingController.ATTEMPT_TOKEN_HEADER));
     configuration.setExposedHeaders(List.of(HttpHeaders.RETRY_AFTER));
     configuration.setAllowCredentials(true);
 

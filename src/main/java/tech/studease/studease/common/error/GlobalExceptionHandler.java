@@ -66,10 +66,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     return build(NOT_FOUND, exc.getMessage(), request);
   }
 
+  @ExceptionHandler(TestSessionAlreadyExistsException.class)
+  public ResponseEntity<ErrorResponse> handleTestSessionAlreadyExists(
+      TestSessionAlreadyExistsException exc, WebRequest request) {
+    return build(HttpStatus.CONFLICT, exc.getMessage(), request);
+  }
+
   @ExceptionHandler({
     CollectionAlreadyExistsException.class,
     IllegalArgumentException.class,
-    TestSessionAlreadyExistsException.class,
     IllegalStateException.class,
     CollectionInUseException.class
   })
